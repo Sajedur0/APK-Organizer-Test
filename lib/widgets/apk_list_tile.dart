@@ -2,7 +2,15 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../app_theme.dart';
 import '../models/apk_file.dart';
+
+/// Icon edge in physical pixels used when decoding the cached APK icon.
+///
+/// The tile draws a 52dp box; decoding the PNG at ~3x that size (instead of its
+/// full resolution) cuts decode time and memory substantially while staying
+/// crisp on high density screens.
+const int _kIconDecodeSize = 160;
 
 class ApkListTile extends StatelessWidget {
   final ApkFile apk;
@@ -34,21 +42,31 @@ class ApkListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final iconPath = apk.iconPath;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       color: isSelected ? colorScheme.primaryContainer.withAlpha(100) : null,
-      elevation: isSelected ? 2 : 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: AppRadius.cardBorder,
+        side: BorderSide(
+          color: isSelected
+              ? colorScheme.primary.withAlpha(140)
+              : colorScheme.outlineVariant.withAlpha(120),
+        ),
+      ),
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppRadius.cardBorder,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
-              children: [
-                Stack(
+            children: [
+              Stack(
                 clipBehavior: Clip.none,
                 children: [
                   Container(
@@ -56,16 +74,20 @@ class ApkListTile extends StatelessWidget {
                     height: 52,
                     decoration: BoxDecoration(
                       color: colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(AppRadius.card),
                     ),
-                    child: apk.iconPath != null && apk.iconPath!.isNotEmpty
+                    child: iconPath != null && iconPath.isNotEmpty
                         ? ClipRRect(
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(AppRadius.card),
                             child: Image.file(
-                              File(apk.iconPath!),
+                              File(iconPath),
                               width: 52,
                               height: 52,
                               fit: BoxFit.cover,
+                              cacheWidth: _kIconDecodeSize,
+                              cacheHeight: _kIconDecodeSize,
+                              filterQuality: FilterQuality.medium,
+                              gaplessPlayback: true,
                               errorBuilder: (context, error, stackTrace) =>
                                   Icon(
                                     Icons.android,
@@ -105,48 +127,55 @@ class ApkListTile extends StatelessWidget {
                 ],
               ),
               const SizedBox(width: 14),
-
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      apk.appName.isNotEmpty ? apk.appName : apk.fileName,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      apk.displayName,
+                      style: textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: colorScheme.primaryContainer.withAlpha(150),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              'v${apk.versionName}',
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: colorScheme.onPrimaryContainer,
-                                fontWeight: FontWeight.w600,
-                              ),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colorScheme.primaryContainer.withAlpha(150),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'v${apk.versionName}',
+                            style: textTheme.labelSmall?.copyWith(
+                              color: colorScheme.onPrimaryContainer,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          Text(
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
                             apk.formattedSize,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: colorScheme.onSurfaceVariant),
+                            style: textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       apk.fileName,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      style: textTheme.bodySmall?.copyWith(
                         color: colorScheme.outline,
                         fontSize: 11,
                       ),
@@ -156,46 +185,37 @@ class ApkListTile extends StatelessWidget {
                   ],
                 ),
               ),
-
-                PopupMenuButton<String>(
+              PopupMenuButton<String>(
+                tooltip: 'More actions',
                 onSelected: (value) {
                   switch (value) {
                     case 'details':
                       onDetails?.call();
-                      break;
                     case 'install':
                       onInstall();
-                      break;
                     case 'auto_rename':
                       onAutoRename();
-                      break;
                     case 'manual_rename':
                       onManualRename();
-                      break;
                     case 'move':
                       onMove();
-                      break;
                     case 'delete':
                       onDelete();
-                      break;
                     case 'share':
                       onShare?.call();
-                      break;
                   }
                 },
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
                 itemBuilder: (context) => [
-                  PopupMenuItem(
-                    value: 'details',
-                    child: ListTile(
-                      leading: Icon(Icons.info_outline),
-                      title: Text('Details'),
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
+                  if (onDetails != null)
+                    const PopupMenuItem(
+                      value: 'details',
+                      child: ListTile(
+                        leading: Icon(Icons.info_outline),
+                        title: Text('Details'),
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                      ),
                     ),
-                  ),
                   const PopupMenuItem(
                     value: 'install',
                     child: ListTile(
@@ -232,22 +252,26 @@ class ApkListTile extends StatelessWidget {
                       dense: true,
                     ),
                   ),
-                  const PopupMenuItem(
-                    value: 'share',
-                    child: ListTile(
-                      leading: Icon(Icons.share),
-                      title: Text('Share'),
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
+                  if (onShare != null)
+                    const PopupMenuItem(
+                      value: 'share',
+                      child: ListTile(
+                        leading: Icon(Icons.share),
+                        title: Text('Share'),
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                      ),
                     ),
-                  ),
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'delete',
                     child: ListTile(
-                      leading: Icon(Icons.delete_outline, color: Colors.red),
+                      leading: Icon(
+                        Icons.delete_outline,
+                        color: colorScheme.error,
+                      ),
                       title: Text(
                         'Delete',
-                        style: TextStyle(color: Colors.red),
+                        style: TextStyle(color: colorScheme.error),
                       ),
                       contentPadding: EdgeInsets.zero,
                       dense: true,

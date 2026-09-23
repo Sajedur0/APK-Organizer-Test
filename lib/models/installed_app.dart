@@ -1,3 +1,9 @@
+import '../utils/format_util.dart';
+
+/// One installed application on the device.
+///
+/// Derived strings (display name, search text, size label) are cached on the
+/// instance so list builds and searches never re-compute them.
 class InstalledApp {
   final String appName;
   final String packageName;
@@ -8,7 +14,7 @@ class InstalledApp {
   final int size;
   final bool isSystemApp;
 
-  const InstalledApp({
+  InstalledApp({
     required this.appName,
     required this.packageName,
     required this.versionName,
@@ -32,30 +38,37 @@ class InstalledApp {
     );
   }
 
-  String get displayName => appName.trim().isEmpty ? packageName : appName;
+  late final String displayName =
+      appName.trim().isEmpty ? packageName : appName;
 
-  String get searchableText => [
+  /// Lower-cased [displayName] — primary sort key.
+  late final String sortName = displayName.toLowerCase();
+
+  /// Lower-cased haystack used by the search box.
+  late final String searchLower = [
     displayName,
     packageName,
     versionName,
     versionCode.toString(),
   ].join(' ').toLowerCase();
 
-  String get formattedSize {
-    if (size <= 0) return 'Unknown size';
-    if (size < 1024) return '$size B';
-    if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
-    if (size < 1024 * 1024 * 1024) {
-      return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    return '${(size / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-  }
+  /// Backwards compatible alias of [searchLower].
+  String get searchableText => searchLower;
+
+  late final String formattedSize =
+      size <= 0 ? 'Unknown size' : FormatUtil.formatBytes(size);
+
+  String get versionLabel => 'v$versionName ($versionCode)';
 
   static int compareByName(InstalledApp a, InstalledApp b) {
-    final name = a.displayName.toLowerCase().compareTo(
-      b.displayName.toLowerCase(),
-    );
+    final name = a.sortName.compareTo(b.sortName);
     if (name != 0) return name;
     return a.packageName.compareTo(b.packageName);
+  }
+
+  static int compareBySize(InstalledApp a, InstalledApp b) {
+    final sizeCompare = a.size.compareTo(b.size);
+    if (sizeCompare != 0) return sizeCompare;
+    return compareByName(a, b);
   }
 }

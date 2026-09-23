@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_theme.dart';
 import '../models/apk_file.dart';
 import '../services/apk_manager_service.dart';
 import '../services/duplicate_handler.dart';
@@ -14,6 +15,8 @@ import '../services/app_update_service.dart';
 import '../services/preferences_service.dart';
 import '../services/renamer_service.dart';
 import '../services/scanner_service.dart';
+import '../utils/format_util.dart';
+import '../utils/parallel_work_queue.dart';
 import '../utils/permission_utils.dart';
 import '../widgets/hexagon_dots_loading.dart';
 import '../widgets/apk_list_tile.dart';
@@ -42,8 +45,18 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
-  List<ApkFile> _allApkFiles = [];
+  /// Master list in scan order (never re-sorted in place) …
+  final List<ApkFile> _allApkFiles = [];
+
+  /// … plus O(1) lookup/update maps so selection, rename, move and delete never
+  /// scan the whole list. `_positionByPath` lets an entry be replaced in place
+  /// without rebuilding or re-sorting the master list.
+  final Map<String, ApkFile> _apkIndex = {};
+  final Map<String, int> _positionByPath = {};
+
+  /// Sorted + filtered view that the ListView renders.
   List<ApkFile> _filteredApkFiles = [];
+
   final Set<String> _selectedPaths = {};
   bool _isLoading = false;
   bool _hasPermission = false;
@@ -62,7 +75,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final _renamerService = RenamerService();
   final _duplicateHandler = DuplicateHandler();
   final _fileOperations = FileOperations();
-  StreamSubscription<Map<String, dynamic>>? _progressSubscription;
+
+  // --- Live scan state -----------------------------------------------------
+  // Progress batches are buffered and applied at most every
+  // [_scanFlushInterval], so a scan of thousands of files triggers a handful of
+  // list rebuilds per second instead of one per file.
+  static const Duration _scanFlushInterval = Duration(milliseconds: 130);
+  static const Duration _minResumeRescanGap = Duration(seconds: 20);
+
+  final List<ApkFile> _scanBuffer = [];
+  Timer? _scanFlushTimer;
+  List<String>? _cachedDirectoryList;
+  int _cachedDirectoryListCount = -1;
+  int _scanFoundCount = 0;
+  String _scanDirectory = '';
+  bool _isDiscovering = true;
+  bool _stopRequested = false;
+  DateTime? _lastScanFinishedAt;
+  DialogRoute<void>? _organizeProgressRoute;
 
   @override
   void initState() {
@@ -86,8 +116,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _searchDebounce?.cancel();
+    _scanFlushTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
-    _progressSubscription?.cancel();
     super.dispose();
   }
 
@@ -111,10 +141,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     try {
       final hasPerm = await PermissionUtils.hasStoragePermission();
       if (!mounted) return;
-      if (hasPerm && !_hasPermission) {
+
+      if (!hasPerm) {
+        if (_hasPermission) setState(() => _hasPermission = false);
+        return;
+      }
+
+      if (!_hasPermission) {
         setState(() => _hasPermission = true);
         await _scanApkFiles();
-      } else if (hasPerm && _allApkFiles.isEmpty && !_isLoading) {
+        return;
+      }
+
+      // Rescanning the whole storage on every resume is wasteful (and jarring).
+      // Only refresh when the list is empty and nothing ran recently.
+      final lastScan = _lastScanFinishedAt;
+      final recentlyScanned =
+          lastScan != null && DateTime.now().difference(lastScan) < _minResumeRescanGap;
+      if (_allApkFiles.isEmpty && !_isLoading && !recentlyScanned) {
         await _scanApkFiles();
       }
     } catch (e) {
@@ -126,7 +170,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() => _isLoading = true);
     try {
       await ApkManagerService.requestStoragePermission();
-      await Future.delayed(const Duration(milliseconds: 500));
+      // The native side resolves the request when the settings screen returns,
+      // so re-check straight away instead of waiting on a fixed timer.
       await _checkPermissionAndScan();
     } on ApkManagerException catch (e) {
       _showSnackBar(e.message, isError: true);
@@ -154,6 +199,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _scanApkFiles() async {
+    // Never start a second scan on top of a running one.
+    if (_scannerService.isScanning) return;
+
     final hasPerm = await PermissionUtils.hasStoragePermission();
     if (!hasPerm) {
       if (!mounted) return;
@@ -163,105 +211,219 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       });
       return;
     }
+
+    _scanFlushTimer?.cancel();
+    _scanBuffer.clear();
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _stopRequested = false;
+      _scanFoundCount = 0;
+      _scanDirectory = '';
+      _isDiscovering = true;
       _selectedPaths.clear();
-      _allApkFiles = [];
+      _allApkFiles.clear();
+      _apkIndex.clear();
+      _positionByPath.clear();
       _filteredApkFiles = [];
     });
-    _progressSubscription?.cancel();
-    _progressSubscription = ApkManagerService.scanProgressStream.listen((
-      event,
-    ) {
-      if (!mounted) return;
-      if (event['type'] == 'progress') {
-        setState(() {
-          final apkMap = event['apk'];
-          if (apkMap is Map) {
-            _upsertScannedApk(
-              ApkFile.fromMap(Map<String, dynamic>.from(apkMap)),
-            );
-          }
-        });
-      }
-    });
+
     try {
-      final result = await _scannerService.scanAllStorage();
-      result.allFiles.sort(ApkFile.compareByDisplayName);
+      final result = await _scannerService.scanAllStorage(
+        isCancelled: () => _stopRequested,
+        onProgress: _onScanProgress,
+      );
+
+      // Apply whatever the final batch left in the buffer before finishing.
+      _flushScanBuffer();
       if (!mounted) return;
+
       setState(() {
-        _allApkFiles = result.allFiles;
+        _apkIndex.clear();
+        _positionByPath.clear();
+        _allApkFiles
+          ..clear()
+          ..addAll(result.allFiles);
+        for (var i = 0; i < _allApkFiles.length; i++) {
+          final apk = _allApkFiles[i];
+          _apkIndex[apk.path] = apk;
+          _positionByPath[apk.path] = i;
+        }
+        _scanFoundCount = result.allFiles.length;
         _applyFilter();
       });
+
+      if (result.cancelled) {
+        _showSnackBar(
+          'Scan stopped — showing ${result.allFiles.length} file(s) found so far',
+        );
+      }
     } on ApkManagerException catch (e) {
       if (!mounted) return;
       setState(() => _errorMessage = e.message);
       _showSnackBar(e.message, isError: true);
     } finally {
-      _progressSubscription?.cancel();
-      _progressSubscription = null;
-      if (mounted) setState(() => _isLoading = false);
+      _scanFlushTimer?.cancel();
+      _scanFlushTimer = null;
+      _lastScanFinishedAt = DateTime.now();
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _scanDirectory = '';
+        });
+      }
     }
   }
 
-  void _applyFilter() {
-    final valid = _allApkFiles.map((a) => a.path).toSet();
-    _selectedPaths.removeWhere((p) => !valid.contains(p));
-    List<ApkFile> filtered;
-    if (_searchQuery.trim().isEmpty) {
-      filtered = List.from(_allApkFiles);
+  /// Receives throttled batches from [ScannerService] and buffers them until
+  /// the next UI flush (never per file, which used to re-sort the whole list on
+  /// every event).
+  void _onScanProgress(ScanProgress progress) {
+    if (!mounted) return;
+    _scanFoundCount = progress.filesFound;
+    if (progress.currentDirectory.isNotEmpty) {
+      _scanDirectory = progress.currentDirectory;
+    }
+    _isDiscovering = progress.isDiscovering;
+    if (progress.apks.isNotEmpty) _scanBuffer.addAll(progress.apks);
+
+    if (_scanFlushTimer?.isActive ?? false) return;
+    _scanFlushTimer = Timer(_scanFlushInterval, () {
+      _scanFlushTimer = null;
+      if (mounted) _flushScanBuffer();
+    });
+  }
+
+  /// Merges buffered scan results into the master list and rebuilds the
+  /// visible (sorted/filtered) slice once.
+  void _flushScanBuffer() {
+    if (_scanBuffer.isEmpty) {
+      if (mounted && _isLoading) {
+        setState(() {}); // refresh the found-count / directory label
+      }
+      return;
+    }
+    for (final apk in _scanBuffer) {
+      _upsert(apk);
+    }
+    _scanBuffer.clear();
+    if (!mounted) return;
+    setState(_applyFilter);
+  }
+
+  /// Adds [apk] to the master list, or replaces the existing entry for the same
+  /// path in place.
+  void _upsert(ApkFile apk) {
+    if (apk.path.isEmpty) return;
+    final position = _positionByPath[apk.path];
+    if (position == null) {
+      _positionByPath[apk.path] = _allApkFiles.length;
+      _allApkFiles.add(apk);
     } else {
-      final q = _searchQuery.trim().toLowerCase();
-      filtered = _allApkFiles.where((a) => a.searchableText.contains(q)).toList();
+      _allApkFiles[position] = apk;
     }
-    if (_filterDirectory != null) {
-      filtered = filtered.where((a) => a.path.startsWith(_filterDirectory!)).toList();
+    _apkIndex[apk.path] = apk;
+  }
+
+  /// Replaces the entry at [oldPath] with [apk] (used after rename/move).
+  void _replaceEntry(String oldPath, ApkFile apk) {
+    final position = _positionByPath.remove(oldPath);
+    _apkIndex.remove(oldPath);
+    if (position != null) {
+      _allApkFiles[position] = apk;
+      _positionByPath[apk.path] = position;
+    } else {
+      _positionByPath[apk.path] = _allApkFiles.length;
+      _allApkFiles.add(apk);
     }
-    _sortFiles(filtered);
-    _filteredApkFiles = filtered;
+    _apkIndex[apk.path] = apk;
+    if (_selectedPaths.remove(oldPath)) _selectedPaths.add(apk.path);
+  }
+
+  /// Removes [path] from every in-memory structure.
+  void _removeEntry(String path) {
+    final position = _positionByPath.remove(path);
+    _apkIndex.remove(path);
+    if (position != null && position < _allApkFiles.length) {
+      if (position == _allApkFiles.length - 1) {
+        _allApkFiles.removeLast();
+      } else {
+        _allApkFiles.removeAt(position);
+        // Re-index the tail that shifted down.
+        for (var i = position; i < _allApkFiles.length; i++) {
+          _positionByPath[_allApkFiles[i].path] = i;
+        }
+      }
+    }
+    _selectedPaths.remove(path);
+  }
+
+  /// Rebuilds [_filteredApkFiles] from the master list.
+  ///
+  /// Runs on every search keystroke (debounced), sort change and scan flush, so
+  /// it avoids per-call allocations: cached search strings, no throwaway path
+  /// sets and a single comparator selected up front.
+  void _applyFilter() {
+    if (_selectedPaths.isNotEmpty) {
+      _selectedPaths.removeWhere((path) => !_apkIndex.containsKey(path));
+    }
+
+    final query = _searchQuery.trim().toLowerCase();
+    final directory = _filterDirectory;
+    final hasQuery = query.isNotEmpty;
+    final hasDirectory = directory != null && directory.isNotEmpty;
+
+    List<ApkFile> result;
+    if (!hasQuery && !hasDirectory) {
+      result = List<ApkFile>.of(_allApkFiles);
+    } else {
+      result = <ApkFile>[];
+      for (final apk in _allApkFiles) {
+        if (hasQuery && !apk.searchLower.contains(query)) continue;
+        if (hasDirectory && !apk.path.startsWith(directory)) continue;
+        result.add(apk);
+      }
+    }
+
+    _sortFiles(result);
+    _filteredApkFiles = result;
   }
 
   void _onSearchChanged(String value) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
-      if (mounted) {
-        setState(() {
-          _searchQuery = value;
-          _applyFilter();
-        });
-      }
+    _searchDebounce = Timer(const Duration(milliseconds: 220), () {
+      if (!mounted) return;
+      setState(() {
+        _searchQuery = value;
+        _applyFilter();
+      });
     });
+  }
+
+  /// Sorts [files] using the current mode/direction.
+  static int Function(ApkFile, ApkFile) _comparatorFor(ApkSortMode mode) {
+    switch (mode) {
+      case ApkSortMode.name:
+        return ApkFile.compareByDisplayName;
+      case ApkSortMode.size:
+        return ApkFile.compareBySize;
+      case ApkSortMode.date:
+        return ApkFile.compareByDate;
+      case ApkSortMode.version:
+        return ApkFile.compareByVersion;
+    }
   }
 
   void _sortFiles(List<ApkFile> files) {
-    files.sort((a, b) {
-      int cmp;
-      switch (_sortMode) {
-        case ApkSortMode.name:
-          cmp = ApkFile.compareByDisplayName(a, b);
-        case ApkSortMode.size:
-          cmp = a.size.compareTo(b.size);
-        case ApkSortMode.date:
-          cmp = a.lastModified.compareTo(b.lastModified);
-        case ApkSortMode.version:
-          cmp = a.versionCode.compareTo(b.versionCode);
-      }
-      return _sortAscending ? cmp : -cmp;
-    });
+    final comparator = _comparatorFor(_sortMode);
+    if (_sortAscending) {
+      files.sort(comparator);
+    } else {
+      files.sort((a, b) => comparator(b, a));
+    }
   }
 
-  void _upsertScannedApk(ApkFile apk) {
-    if (apk.path.isEmpty) return;
-    final index = _allApkFiles.indexWhere((item) => item.path == apk.path);
-    if (index >= 0) {
-      _allApkFiles[index] = apk;
-    } else {
-      _allApkFiles.add(apk);
-    }
-    _allApkFiles.sort(ApkFile.compareByDisplayName);
-    _applyFilter();
-  }
+
 
   Future<void> _installApk(ApkFile apk, {bool silent = false}) async {
     final canInstall = await PermissionUtils.canInstallPackages();
@@ -285,7 +447,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (status == 'redirected_to_settings') {
         _showSnackBar('Please enable "Install unknown apps" and try again.');
       } else if (!silent) {
-        _showSnackBar('Installation started for ${apk.appName}');
+        _showSnackBar('Installation started for ${apk.displayName}');
       }
     } on ApkManagerException catch (e) {
       if (!silent) _showSnackBar(e.message, isError: true);
@@ -295,23 +457,38 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _installSelectedApks() async {
     if (_selectedPaths.isEmpty) return;
+    final apps = _selectedPaths
+        .map(_apkByPath)
+        .whereType<ApkFile>()
+        .toList(growable: false);
+    if (apps.isEmpty) return;
+
     int started = 0;
     int failed = 0;
     final failedNames = <String>[];
-    for (final path in List<String>.from(_selectedPaths)) {
-      final apk = _apkByPath(path);
-      if (apk == null) continue;
+    for (var i = 0; i < apps.length; i++) {
+      if (!mounted) return;
+      // Android shows one installer at a time, so the intents are spaced out
+      // instead of being fired back to back (where all but the last are lost).
+      if (i > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 900));
+        if (!mounted) return;
+      }
       try {
-        await _installApk(apk, silent: true);
+        await _installApk(apps[i], silent: true);
         started++;
       } catch (_) {
         failed++;
-        failedNames.add(apk.appName);
+        if (failedNames.length < 3) failedNames.add(apps[i].displayName);
       }
     }
+    if (!mounted) return;
+    final failedLabel = failedNames.isEmpty
+        ? ''
+        : ', $failed failed (${failedNames.join(', ')}'
+            '${failed > failedNames.length ? '…' : ''})';
     _showSnackBar(
-      '$started installation(s) started'
-      '${failed > 0 ? ', $failed failed: ${failedNames.join(", ")}' : ''}',
+      '$started installation(s) started$failedLabel',
       isError: failed > 0 && started == 0,
     );
   }
@@ -335,17 +512,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     final confirmed = await _showConfirmDialog(
       'Delete APK',
-      'Are you sure you want to delete "${apk.appName}"?',
+      'Are you sure you want to delete "${apk.displayName}"?',
     );
     if (!confirmed) return;
     try {
       await ApkManagerService.deleteApk(apk.path);
+      if (!mounted) return;
       setState(() {
-        _allApkFiles.removeWhere((a) => a.path == apk.path);
-        _selectedPaths.remove(apk.path);
+        _removeEntry(apk.path);
         _applyFilter();
       });
-      _showSnackBar('${apk.appName} deleted');
+      _showSnackBar('${apk.displayName} deleted');
     } on ApkManagerException catch (e) {
       _showSnackBar(e.message, isError: true);
     }
@@ -374,27 +551,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       'Are you sure you want to delete ${_selectedPaths.length} APK file(s)?',
     );
     if (!confirmed) return;
+    final paths = List<String>.from(_selectedPaths);
     final failed = <String>[];
-    for (final path in List<String>.from(_selectedPaths)) {
+    for (final path in paths) {
       try {
         await ApkManagerService.deleteApk(path);
       } on ApkManagerException {
         failed.add(path);
       }
     }
+    if (!mounted) return;
     setState(() {
-      for (final path in List<String>.from(_selectedPaths)) {
-        if (!failed.contains(path)) {
-          _allApkFiles.removeWhere((a) => a.path == path);
-        }
+      for (final path in paths) {
+        if (failed.contains(path)) continue;
+        _removeEntry(path);
       }
       _selectedPaths.clear();
       _applyFilter();
     });
     if (failed.isEmpty) {
-      _showSnackBar('All selected APKs deleted');
+      _showSnackBar('${paths.length} APK file(s) deleted');
+    } else if (failed.length == paths.length) {
+      _showSnackBar('Could not delete the selected file(s)', isError: true);
     } else {
-      _showSnackBar('${failed.length} file(s) failed to delete', isError: true);
+      _showSnackBar(
+        '${paths.length - failed.length} deleted, ${failed.length} failed to delete',
+        isError: true,
+      );
     }
   }
 
@@ -415,12 +598,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         return;
       }
     }
+    if (!apk.needsRename) {
+      _showSnackBar('${apk.fileName} already follows AppName_Version.apk');
+      return;
+    }
     final newName = apk.suggestedRename;
     try {
       final result = await ApkManagerService.renameApk(apk.path, newName);
       final oldName = apk.fileName;
       final newPath = result['newPath'] as String?;
       final newNameResult = result['newName'] as String?;
+      if (!mounted) return;
       _applyRenameResult(apk.path, result);
       _showSnackBar(
         'Renamed to ${newNameResult ?? newName}',
@@ -468,7 +656,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: AppRadius.dialogBorder),
         title: const Text('Rename APK'),
         content: TextField(
           controller: controller,
@@ -476,7 +664,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           decoration: InputDecoration(
             labelText: 'New file name',
             hintText: 'e.g., MyApp_1.0.apk',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            border: OutlineInputBorder(
+              borderRadius: AppRadius.controlBorder,
+            ),
           ),
           onSubmitted: (v) => Navigator.pop(ctx, v),
         ),
@@ -494,31 +684,39 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
     controller.dispose();
     if (newName == null || newName.trim().isEmpty) return;
+    if (newName.trim().toLowerCase() == apk.fileName.toLowerCase()) {
+      _showSnackBar('File name is unchanged');
+      return;
+    }
     try {
       final result = await ApkManagerService.renameApk(apk.path, newName.trim());
+      if (!mounted) return;
       _applyRenameResult(apk.path, result);
-      _showSnackBar('File renamed successfully');
+      final applied = result['newName'] as String? ?? newName.trim();
+      _showSnackBar('Renamed to $applied');
     } on ApkManagerException catch (e) {
       _showSnackBar(e.message, isError: true);
     }
   }
 
   /// Applies a native rename result to the in-memory list without re-scanning.
-  void _applyRenameResult(String oldPath, Map<String, dynamic> result) {
+  ///
+  /// Returns the new path so callers can build an accurate "Undo" action even
+  /// when the native layer had to add a conflict suffix.
+  String? _applyRenameResult(String oldPath, Map<String, dynamic> result) {
     final newPath = result['newPath'] as String?;
     final newName = result['newName'] as String?;
-    if (newPath == null || newName == null) return;
-    if (!mounted) return;
+    if (newPath == null || newName == null || !mounted) return null;
+    final existing = _apkIndex[oldPath];
+    if (existing == null) return newPath;
     setState(() {
-      final index = _allApkFiles.indexWhere((a) => a.path == oldPath);
-      if (index >= 0) {
-        _allApkFiles[index] =
-            _allApkFiles[index].copyWith(path: newPath, fileName: newName);
-        _allApkFiles.sort(ApkFile.compareByDisplayName);
-      }
-      if (_selectedPaths.remove(oldPath)) _selectedPaths.add(newPath);
+      _replaceEntry(
+        oldPath,
+        existing.copyWith(path: newPath, fileName: newName),
+      );
       _applyFilter();
     });
+    return newPath;
   }
 
   /// Applies a reverse rename (newPath -> originalPath/originalName) to the
@@ -529,16 +727,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     String originalName,
   ) {
     if (!mounted) return;
+    final existing = _apkIndex[newPath];
+    if (existing == null) return;
     setState(() {
-      final index = _allApkFiles.indexWhere((a) => a.path == newPath);
-      if (index >= 0) {
-        _allApkFiles[index] = _allApkFiles[index].copyWith(
-          path: originalPath,
-          fileName: originalName,
-        );
-        _allApkFiles.sort(ApkFile.compareByDisplayName);
-      }
-      if (_selectedPaths.remove(newPath)) _selectedPaths.add(originalPath);
+      _replaceEntry(
+        newPath,
+        existing.copyWith(path: originalPath, fileName: originalName),
+      );
       _applyFilter();
     });
   }
@@ -563,7 +758,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     final confirmed = await _showConfirmDialog(
       'Auto Rename',
-      'Rename ${_selectedPaths.length} APK file(s) using AppName_Version format?',
+      'Rename ${_selectedPaths.length} APK file(s) to AppName_Version.apk?\n\n'
+          'Files that already follow this format are skipped.',
     );
     if (!confirmed) return;
     final selected = _selectedPaths
@@ -571,27 +767,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         .whereType<ApkFile>()
         .toList();
     final summary = await _renamerService.autoRenameAll(selected);
+    if (!mounted) return;
     // Update the in-memory list from the returned results instead of a full
     // storage re-scan.
-    final renameByOldPath = {
-      for (final r in summary.results)
-        if (r.success && r.newPath != null && r.newName != null)
-          r.originalPath: r,
-    };
-    if (mounted) {
-      setState(() {
-        _allApkFiles = _allApkFiles.map((apk) {
-          final r = renameByOldPath[apk.path];
-          if (r == null) return apk;
-          return apk.copyWith(path: r.newPath, fileName: r.newName);
-        }).toList();
-        _allApkFiles.sort(ApkFile.compareByDisplayName);
-        _selectedPaths.clear();
-        _applyFilter();
-      });
-    }
+    setState(() {
+      for (final r in summary.results) {
+        if (!r.success || r.newPath == null || r.newName == null) continue;
+        final existing = _apkIndex[r.originalPath];
+        if (existing == null) continue;
+        _replaceEntry(
+          r.originalPath,
+          existing.copyWith(path: r.newPath, fileName: r.newName),
+        );
+      }
+      _selectedPaths.clear();
+      _applyFilter();
+    });
+    final unchanged = summary.total - summary.succeeded - summary.failed;
     _showSnackBar(
       '${summary.succeeded} file(s) renamed'
+      '${unchanged > 0 ? ', $unchanged already named' : ''}'
       '${summary.failed > 0 ? ', ${summary.failed} failed' : ''}',
       actionLabel: summary.results.any((r) => r.success && r.newPath != null)
           ? 'Undo'
@@ -606,27 +801,51 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  String _originalFileName(String path) {
-    final idx = path.lastIndexOf('/');
-    return idx >= 0 ? path.substring(idx + 1) : path;
-  }
+  String _originalFileName(String path) => FormatUtil.fileName(path);
 
   Future<void> _undoRename(
     List<({String newPath, String originalPath, String originalName})> items,
   ) async {
+    if (items.isEmpty) return;
+    final results = List<String?>.filled(items.length, null);
+    await runParallel(
+      total: items.length,
+      concurrency: 3,
+      task: (index) async {
+        final item = items[index];
+        try {
+          final result = await ApkManagerService.renameApk(
+            item.newPath,
+            item.originalName,
+          );
+          results[index] = result['newPath'] as String? ?? item.originalPath;
+        } on ApkManagerException {
+          results[index] = null;
+        }
+      },
+    );
+
+    if (!mounted) return;
     int failed = 0;
-    for (final item in items) {
-      try {
-        await ApkManagerService.renameApk(item.newPath, item.originalName);
-        _applyRenameResultFrom(
-          item.newPath,
-          item.originalPath,
-          item.originalName,
+    setState(() {
+      for (var i = 0; i < items.length; i++) {
+        final restoredPath = results[i];
+        if (restoredPath == null) {
+          failed++;
+          continue;
+        }
+        final existing = _apkIndex[items[i].newPath];
+        if (existing == null) continue;
+        _replaceEntry(
+          items[i].newPath,
+          existing.copyWith(
+            path: restoredPath,
+            fileName: _originalFileName(restoredPath),
+          ),
         );
-      } on ApkManagerException {
-        failed++;
       }
-    }
+      _applyFilter();
+    });
     _showSnackBar(
       failed == 0
           ? 'Rename undone'
@@ -643,7 +862,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       MaterialPageRoute(
         builder: (_) => ApkDetailPage(
           filePath: apk.path,
-          appName: apk.appName,
+          appName: apk.displayName,
         ),
       ),
     );
@@ -674,47 +893,48 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     try {
       final roots = await ApkManagerService.getDirectories();
       if (!mounted) return;
+      if (!mounted) return;
       final selectedDir = await showModalBottomSheet<String>(
         context: context,
         isScrollControlled: true,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.sheet),
+          ),
         ),
         builder: (ctx) => DirectoryBrowserSheet(initialDirectories: roots),
       );
       if (selectedDir == null) return;
       final summary = await _fileOperations.batchMove(paths, selectedDir);
+      if (!mounted) return;
       // Update the in-memory list from the returned results instead of a full
       // storage re-scan.
-      final moveByOldPath = {
-        for (final r in summary.results)
-          if (r.success && r.destPath != null) r.sourcePath: r.destPath!,
-      };
-      if (mounted) {
-        setState(() {
-          _allApkFiles = _allApkFiles.map((apk) {
-            final newPath = moveByOldPath[apk.path];
-            if (newPath == null) return apk;
-            final idx = newPath.lastIndexOf('/');
-            final newFileName =
-                idx >= 0 ? newPath.substring(idx + 1) : apk.fileName;
-            return apk.copyWith(path: newPath, fileName: newFileName);
-          }).toList();
-          _allApkFiles.sort(ApkFile.compareByDisplayName);
-          _selectedPaths.clear();
-          _applyFilter();
-        });
-      }
-      final msg =
-          '${summary.succeeded} file(s) moved${summary.failed > 0 ? ', ${summary.failed} failed' : ''}${summary.conflictsResolved > 0 ? ', ${summary.conflictsResolved} conflict(s) resolved' : ''}';
+      setState(() {
+        for (final r in summary.results) {
+          final newPath = r.destPath;
+          if (!r.success || newPath == null || r.skipped) continue;
+          final existing = _apkIndex[r.sourcePath];
+          if (existing == null) continue;
+          _replaceEntry(
+            r.sourcePath,
+            existing.copyWith(
+              path: newPath,
+              fileName: _originalFileName(newPath),
+            ),
+          );
+        }
+        _selectedPaths.clear();
+        _applyFilter();
+      });
+
       final undoMap = <String, String>{};
       for (final r in summary.results) {
-        if (r.success && r.destPath != null) {
+        if (r.success && !r.skipped && r.destPath != null) {
           undoMap[r.destPath!] = r.sourcePath;
         }
       }
       _showSnackBar(
-        msg,
+        summary.describe(),
         actionLabel: undoMap.isNotEmpty ? 'Undo' : null,
         onAction: undoMap.isNotEmpty ? () => _undoMove(undoMap) : null,
         duration: const Duration(seconds: 6),
@@ -725,39 +945,53 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _undoMove(Map<String, String> undoMap) async {
-    final failed = <String>[];
-    for (final entry in undoMap.entries) {
-      try {
-        await ApkManagerService.moveApk(entry.key, entry.value);
-      } on ApkManagerException {
-        failed.add(entry.key);
-      }
-    }
-    if (mounted) {
-      setState(() {
-        for (final entry in undoMap.entries) {
-          final idx = entry.value.lastIndexOf('/');
-          final newFileName =
-              idx >= 0 ? entry.value.substring(idx + 1) : '';
-          final index = _allApkFiles.indexWhere((a) => a.path == entry.key);
-          if (index >= 0) {
-            _allApkFiles[index] = _allApkFiles[index].copyWith(
-              path: entry.value,
-              fileName: newFileName.isNotEmpty
-                  ? newFileName
-                  : _allApkFiles[index].fileName,
-            );
-          }
+    if (undoMap.isEmpty) return;
+    final entries = undoMap.entries.toList();
+    final restoredPaths = List<String?>.filled(entries.length, null);
+
+    await runParallel(
+      total: entries.length,
+      concurrency: 3,
+      task: (index) async {
+        final entry = entries[index];
+        try {
+          final result = await ApkManagerService.moveApk(
+            entry.key,
+            FormatUtil.parentPath(entry.value),
+          );
+          restoredPaths[index] = result['destPath'] as String?;
+        } on ApkManagerException {
+          restoredPaths[index] = null;
         }
-        _allApkFiles.sort(ApkFile.compareByDisplayName);
-        _applyFilter();
-      });
-    }
+      },
+    );
+
+    if (!mounted) return;
+    var failed = 0;
+    setState(() {
+      for (var i = 0; i < entries.length; i++) {
+        final restoredPath = restoredPaths[i];
+        if (restoredPath == null) {
+          failed++;
+          continue;
+        }
+        final existing = _apkIndex[entries[i].key];
+        if (existing == null) continue;
+        _replaceEntry(
+          entries[i].key,
+          existing.copyWith(
+            path: restoredPath,
+            fileName: _originalFileName(restoredPath),
+          ),
+        );
+      }
+      _applyFilter();
+    });
     _showSnackBar(
-      failed.isEmpty
+      failed == 0
           ? 'Move undone'
-          : '${failed.length} file(s) failed to restore',
-      isError: failed.isNotEmpty,
+          : '$failed file(s) failed to restore',
+      isError: failed > 0,
     );
   }
 
@@ -773,22 +1007,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   void _selectAll() {
     setState(() {
-      if (_selectedPaths.length == _filteredApkFiles.length) {
+      final allSelected = _filteredApkFiles.isNotEmpty &&
+          _selectedPaths.length == _filteredApkFiles.length;
+      if (allSelected) {
         _selectedPaths.clear();
       } else {
-        _selectedPaths.addAll(_filteredApkFiles.map((a) => a.path));
+        _selectedPaths
+          ..clear()
+          ..addAll(_filteredApkFiles.map((a) => a.path));
       }
     });
   }
 
   void _clearSelection() => setState(() => _selectedPaths.clear());
 
-  ApkFile? _apkByPath(String path) {
-    for (final apk in _allApkFiles) {
-      if (apk.path == path) return apk;
-    }
-    return null;
-  }
+  ApkFile? _apkByPath(String path) => _apkIndex[path];
 
   Future<void> _smartOrganize() async {
     if (!_hasPermission) {
@@ -825,18 +1058,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       );
 
       // Update the in-memory list instead of re-scanning all storage.
-      final renameByOldPath = {
-        for (final r in renameSummary.results)
-          if (r.success) r.originalPath: r,
-      };
       if (mounted) {
         setState(() {
-          _allApkFiles = _allApkFiles.map((apk) {
-            final r = renameByOldPath[apk.path];
-            if (r == null) return apk;
-            return apk.copyWith(path: r.newPath, fileName: r.newName);
-          }).toList();
-          _selectedPaths.clear();
+          for (final r in renameSummary.results) {
+            if (!r.success) continue;
+            final newPath = r.newPath;
+            final newName = r.newName;
+            if (newPath == null || newName == null) continue;
+            final existing = _apkIndex[r.originalPath];
+            if (existing == null) continue;
+            _replaceEntry(
+              r.originalPath,
+              existing.copyWith(path: newPath, fileName: newName),
+            );
+          }
           _applyFilter();
         });
       }
@@ -855,10 +1090,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         isCancelled: () => token.isCancelled,
       );
 
-      final deletedPaths = dupSummary.deletedPaths.toSet();
+      final deletedPaths = dupSummary.deletedPaths;
       if (mounted) {
         setState(() {
-          _allApkFiles.removeWhere((apk) => deletedPaths.contains(apk.path));
+          for (final path in deletedPaths) {
+            _removeEntry(path);
+          }
           _selectedPaths.clear();
           _applyFilter();
         });
@@ -877,13 +1114,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         details: [
           if (renameSummary.succeeded > 0)
             'Renamed ${renameSummary.succeeded} file(s)',
+          if (renameSummary.skipped > 0)
+            '${renameSummary.skipped} file(s) already had the correct name',
           if (dupSummary.filesDeleted > 0)
             'Removed ${dupSummary.filesDeleted} duplicate(s)',
+          if (dupSummary.errors.isNotEmpty)
+            '${dupSummary.errors.length} duplicate(s) could not be removed',
         ],
         errors: [
           ...renameSummary.results
               .where((r) => !r.success)
-              .map((r) => 'Rename: ${r.error}'),
+              .map((r) => 'Rename ${r.originalPath.split('/').last}: ${r.error}'),
           ...dupSummary.errors,
         ],
       );
@@ -898,7 +1139,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ValueNotifier<(int, int, String)> progress,
   ) async {
     if (!mounted) return;
-    await showDialog<void>(
+    // The dialog is pushed manually so it can be closed by identity later:
+    // popping "whatever is on top" could dismiss an unrelated route.
+    final route = DialogRoute<void>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => ValueListenableBuilder<(int, int, String)>(
@@ -908,14 +1151,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           final total = value.$2;
           final ratio = total == 0 ? null : done / total;
           return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: AppRadius.dialogBorder,
+            ),
             title: Text('Auto Organize — ${value.$3}'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                LinearProgressIndicator(value: ratio),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(value: ratio),
+                ),
                 const SizedBox(height: 12),
                 Text(
-                  total == 0 ? 'Working…' : '$done / $total',
+                  total == 0
+                      ? 'Working…'
+                      : '$done / $total file(s)',
                 ),
               ],
             ),
@@ -929,12 +1181,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         },
       ),
     );
+    _organizeProgressRoute = route;
+    try {
+      await Navigator.of(context).push(route);
+    } finally {
+      if (identical(_organizeProgressRoute, route)) {
+        _organizeProgressRoute = null;
+      }
+    }
   }
 
+  /// Closes exactly the organize-progress dialog (and nothing else).
   void _closeOrganizeProgressDialog() {
-    if (!mounted) return;
-    final navigator = Navigator.of(context, rootNavigator: true);
-    if (navigator.canPop()) navigator.pop();
+    final route = _organizeProgressRoute;
+    _organizeProgressRoute = null;
+    if (route == null || !mounted || !route.isActive) return;
+    Navigator.of(context).removeRoute(route);
   }
 
 
@@ -982,7 +1244,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: AppRadius.dialogBorder),
         title: Text(title),
         content: Text(message),
         actions: [
@@ -1020,7 +1282,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return PopupMenuButton<ApkSortMode>(
       icon: Icon(sortIcons[_sortMode], size: 20),
       tooltip: 'Sort: ${sortLabels[_sortMode]}',
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: AppRadius.controlBorder),
       onSelected: (mode) {
         setState(() {
           if (_sortMode == mode) {
@@ -1078,23 +1340,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// Opens a searchable bottom sheet to filter APK files by their directory.
   Future<void> _showFilterSheet() async {
     if (_allApkFiles.isEmpty) return;
-    final dirs = _allApkFiles
-        .map((a) {
-          final idx = a.path.lastIndexOf('/');
-          return idx > 0 ? a.path.substring(0, idx) : '/';
-        })
-        .toSet()
-        .toList()
-      ..sort();
+    // Reuse the cached list while the scan set is unchanged (the sheet is
+    // rebuilt from scratch every time it opens).
+    if (_cachedDirectoryList == null ||
+        _cachedDirectoryListCount != _allApkFiles.length) {
+      final dirs = <String>{
+        for (final apk in _allApkFiles) apk.directory,
+      }.toList()
+        ..sort();
+      _cachedDirectoryList = dirs;
+      _cachedDirectoryListCount = _allApkFiles.length;
+    }
     if (!mounted) return;
     final selected = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.sheet),
+        ),
       ),
       builder: (ctx) => _DirectoryFilterSheet(
-        directories: dirs,
+        directories: _cachedDirectoryList!,
         currentFilter: _filterDirectory,
       ),
     );
@@ -1144,71 +1411,229 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     if (_filteredApkFiles.isEmpty) {
       if (_isLoading) {
-        return const Center(child: HexagonDotsLoading(minRadius: 10));
-      }
-
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.folder_open_outlined,
-              size: 80,
-              color: Theme.of(context).colorScheme.outline,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _searchQuery.isNotEmpty
-                  ? 'No APK files match your search'
-                  : 'No APK files found',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            if (_searchQuery.isEmpty) ...[
-              const SizedBox(height: 8),
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const HexagonDotsLoading(minRadius: 10),
+              const SizedBox(height: 20),
               Text(
-                'Tap the scan button to search for APK files',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                _isDiscovering
+                    ? 'Searching storage…'
+                    : 'Reading APK files…',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
+              if (_scanFoundCount > 0) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '$_scanFoundCount found so far',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ),
+              ],
+              if (_scanDirectory.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    _scanDirectory,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              TextButton.icon(
+                onPressed: _stopScan,
+                icon: const Icon(Icons.stop_circle_outlined),
+                label: const Text('Stop'),
+              ),
             ],
-          ],
+          ),
+        );
+      }
+
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.folder_open_outlined,
+                size: 80,
+                color: Theme.of(context).colorScheme.outline,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _searchQuery.isNotEmpty
+                    ? 'No APK files match your search'
+                    : 'No APK files found',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (_searchQuery.isEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Tap Scan Now to look for APK files on this device',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: _scanApkFiles,
+                  icon: const Icon(Icons.search),
+                  label: const Text('Scan Now'),
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.only(bottom: 80),
-      itemCount: _filteredApkFiles.length,
-      itemBuilder: (context, index) {
-        final apk = _filteredApkFiles[index];
-        return ApkListTile(
-          apk: apk,
-          isSelected: _selectedPaths.contains(apk.path),
-          onTap: () {
-            if (_selectedPaths.isNotEmpty) {
-              _toggleSelection(apk);
-            } else {
-              _showApkDetailsBottomSheet(apk);
-            }
-          },
-          onLongPress: () => _toggleSelection(apk),
-          onInstall: () => _installApk(apk),
-          onDelete: () => _deleteApk(apk),
-          onAutoRename: () => _autoRenameApk(apk),
-          onManualRename: () => _manualRenameApk(apk),
-          onMove: () => _moveApk(apk),
-          onDetails: () => _showApkDetail(apk),
-          onShare: () => _shareApkFiles([apk]),
-        );
-      },
+    return Column(
+      children: [
+        if (_isLoading) _buildScanProgressBar(),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.only(top: 4, bottom: 88),
+            // Every tile has an identical intrinsic height, so the list can be
+            // laid out from a single prototype: no per-item measurement, exact
+            // scrollbar and instant jump-to-top behaviour on long lists.
+            prototypeItem: _buildPrototypeTile(),
+            addAutomaticKeepAlives: false,
+            itemCount: _filteredApkFiles.length,
+            cacheExtent: 600,
+            itemBuilder: (context, index) {
+              final apk = _filteredApkFiles[index];
+              return ApkListTile(
+                key: ValueKey<String>(apk.path),
+                apk: apk,
+                isSelected: _selectedPaths.contains(apk.path),
+                onTap: () {
+                  if (_selectedPaths.isNotEmpty) {
+                    _toggleSelection(apk);
+                  } else {
+                    _showApkDetailsBottomSheet(apk);
+                  }
+                },
+                onLongPress: () => _toggleSelection(apk),
+                onInstall: () => _installApk(apk),
+                onDelete: () => _deleteApk(apk),
+                onAutoRename: () => _autoRenameApk(apk),
+                onManualRename: () => _manualRenameApk(apk),
+                onMove: () => _moveApk(apk),
+                onDetails: () => _showApkDetail(apk),
+                onShare: () => _shareApkFiles([apk]),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
+  /// A single, never-shown tile used by the list to measure item height once.
+  Widget _buildPrototypeTile() {
+    final sample = _filteredApkFiles.isNotEmpty
+        ? _filteredApkFiles.first
+        : ApkFile(
+          fileName: 'example_1.0.apk',
+          path: '/example_1.0.apk',
+          size: 1024,
+          appName: 'Example',
+          packageName: 'com.example',
+          versionName: '1.0',
+          versionCode: 1,
+        );
+    return ApkListTile(
+      apk: sample,
+      isSelected: false,
+      onTap: () {},
+      onLongPress: () {},
+      onInstall: () {},
+      onDelete: () {},
+      onAutoRename: () {},
+      onManualRename: () {},
+      onMove: () {},
+    );
+  }
+
+  /// Thin progress strip shown above the list while a scan is running.
+  Widget _buildScanProgressBar() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final directory = _scanDirectory;
+    final label = _isDiscovering
+        ? 'Searching storage…'
+        : 'Reading APK files…';
+    return Material(
+      color: colorScheme.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$_scanFoundCount found · $label',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (directory.isNotEmpty)
+                    Text(
+                      directory,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.outline,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: _stopScan,
+              child: const Text('Stop'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Requests the running scan to stop; partial results are kept.
+  void _stopScan() {
+    if (!_scannerService.isScanning) return;
+    setState(() => _stopRequested = true);
+    _showSnackBar('Stopping scan…');
+  }
+
   void _onDrawerItemSelected(String route) {
-    Navigator.pop(context);
+    Navigator.of(context).pop();
     switch (route) {
       case 'apk_manager':
         break;
@@ -1287,7 +1712,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ShareParams(
           files: files,
           text: files.length == 1
-              ? 'Sharing ${apks.first.appName}'
+              ? 'Sharing ${apks.first.displayName}'
               : 'Sharing ${files.length} APK files',
         ),
       );
@@ -1302,8 +1727,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _selectedPaths.map(_apkByPath).whereType<ApkFile>().toList();
     await _shareApkFiles(apks);
   }
-
-
 
   Future<void> _rateUs() async {
     const url =
@@ -1360,7 +1783,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: AppRadius.dialogBorder),
         title: const Text('Exit'),
         content: const Text('Are you sure you want to exit?'),
         actions: [
@@ -1383,14 +1806,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _showApkDetailsBottomSheet(ApkFile apk) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final lastSlash = apk.path.lastIndexOf('/');
-    final dirPath = lastSlash >= 0 ? apk.path.substring(0, lastSlash) : '/';
+    final dirPath = apk.directory;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.sheet),
+        ),
       ),
       builder: (ctx) => DraggableScrollableSheet(
         initialChildSize: 0.55,
@@ -1437,6 +1861,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                 width: 72,
                                 height: 72,
                                 fit: BoxFit.cover,
+                                cacheWidth: 216,
+                                cacheHeight: 216,
+                                filterQuality: FilterQuality.medium,
                                 errorBuilder: (_, _, _) => Icon(
                                   Icons.android,
                                   color: colorScheme.primary,
@@ -1456,7 +1883,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            apk.appName.isNotEmpty ? apk.appName : apk.fileName,
+                            apk.displayName,
                             style: textTheme.titleLarge?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
@@ -1607,6 +2034,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       label: 'File Name',
                       value: apk.fileName,
                     ),
+                    if (apk.lastModified > 0) ...[
+                      const SizedBox(height: 12),
+                      DetailRow(
+                        icon: Icons.schedule_outlined,
+                        label: 'Modified',
+                        value: FormatUtil.formatAge(apk.lastModified),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1614,6 +2049,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         ),
       ),
+    );
+  }
+
+  Widget? _buildScanFab() {
+    if (!_hasPermission || _selectedPaths.isNotEmpty || _isSearching) {
+      return null;
+    }
+    if (_isLoading) {
+      return FloatingActionButton.extended(
+        heroTag: 'scan_fab',
+        onPressed: _stopScan,
+        backgroundColor: Theme.of(context).colorScheme.errorContainer,
+        foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
+        icon: const Icon(Icons.stop_rounded),
+        label: const Text('Stop'),
+      );
+    }
+    return FloatingActionButton.extended(
+      heroTag: 'scan_fab',
+      onPressed: _scanApkFiles,
+      icon: const Icon(Icons.refresh),
+      label: const Text('Scan Now'),
     );
   }
 
@@ -1707,7 +2164,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     filled: true,
                     fillColor: colorScheme.surfaceContainerHighest.withAlpha(120),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
+                      borderRadius: BorderRadius.circular(999),
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
@@ -1891,20 +2348,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ],
       ),
       body: _buildBody(),
-      floatingActionButton:
-          (_hasPermission &&
-              _selectedPaths.isEmpty &&
-              !_isLoading &&
-              !_isSearching)
-          ? FloatingActionButton.extended(
-              onPressed: _scanApkFiles,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Scan Now'),
-            )
-          : null,
+      floatingActionButton: _buildScanFab(),
       bottomNavigationBar: _selectedPaths.isEmpty
           ? null
-            : SelectionBottomBar(
+          : SelectionBottomBar(
                 selectedCount: _selectedPaths.length,
                 totalCount: _filteredApkFiles.length,
                 onSelectAll: _selectAll,
@@ -2007,7 +2454,7 @@ class _DirectoryFilterSheetState extends State<_DirectoryFilterSheet> {
                 filled: true,
                 fillColor: colorScheme.surfaceContainerHighest.withAlpha(120),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(999),
                   borderSide: BorderSide.none,
                 ),
                 isDense: true,

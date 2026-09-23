@@ -46,8 +46,8 @@ class SelectionBottomBar extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
+            children: [
+              Row(
                 children: [
                   TextButton.icon(
                     onPressed: onSelectAll,

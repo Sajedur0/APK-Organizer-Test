@@ -16,17 +16,18 @@ class CompactActionChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(12);
     return Material(
       color: Colors.transparent,
       elevation: 0,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: radius,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: color.withAlpha(20),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: radius,
             border: Border.all(color: color.withAlpha(50), width: 1),
           ),
           child: Row(
@@ -36,6 +37,8 @@ class CompactActionChip extends StatelessWidget {
               const SizedBox(width: 6),
               Text(
                 label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: color,
                   fontWeight: FontWeight.w600,

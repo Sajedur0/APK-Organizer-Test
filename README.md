@@ -10,7 +10,7 @@ A lightweight yet powerful Android utility built with Flutter.
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.11%2B-02569B?logo=flutter&logoColor=white&style=for-the-badge)](https://flutter.dev)
 [![Android](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white&style=for-the-badge)](https://www.android.com)
-[![Version](https://img.shields.io/badge/Version-1.0.8-blue?style=for-the-badge)](https://github.com/Sajedur0/APK-Organizer/releases)
+[![Version](https://img.shields.io/badge/Version-1.0.9-blue?style=for-the-badge)](https://github.com/Sajedur0/APK-Organizer/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/Sajedur0/APK-Organizer?style=for-the-badge&logo=github)](https://github.com/Sajedur0/APK-Organizer/stargazers)
 [![Issues](https://img.shields.io/github/issues/Sajedur0/APK-Organizer?style=for-the-badge&logo=github)](https://github.com/Sajedur0/APK-Organizer/issues)
@@ -67,6 +67,13 @@ A lightweight yet powerful Android utility built with Flutter.
 </td>
 </tr>
 </table>
+
+### ⚡ Performance
+- Batched scan progress — the list updates a few times per second, not per file
+- Directories are walked once, APKs are parsed on a background worker pool
+- Cached icons decoded at display size; fixed-extent lists for stutter-free scroll
+- O(1) lookups for selection, rename, move and delete (no full-list rescans)
+- Stoppable scans that keep the files found so far
 
 ### Also Includes
 - **Installed Apps** — Browse user & system apps with detail page

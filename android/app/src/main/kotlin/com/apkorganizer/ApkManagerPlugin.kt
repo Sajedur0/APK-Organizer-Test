@@ -10,7 +10,6 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
@@ -32,10 +31,28 @@ import io.flutter.plugin.common.PluginRegistry
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.concurrent.Executor
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipFile
 
+/**
+ * Native bridge for APK Organizer.
+ *
+ * Threading model (important for smoothness):
+ *  - [coordinatorExecutor] walks the storage tree (single thread, I/O bound).
+ *  - [workerPool] parses APK archives / decodes app icons in parallel.
+ *  - [ioExecutor] runs file operations (rename / move / delete / backup) so a
+ *    long scan can never block them, and vice versa.
+ *  - All Flutter `Result` callbacks are posted back on the main thread.
+ *
+ * Progress events are **batched and throttled** (see [emitProgress]) so a scan
+ * of thousands of APKs does not flood the platform channel — that was the main
+ * cause of jank during scanning.
+ */
 class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     PluginRegistry.ActivityResultListener, PluginRegistry.RequestPermissionsResultListener {
 
@@ -48,8 +65,39 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private var pendingInstallPermissionResult: Result? = null
     private var flutterPluginBinding: FlutterPlugin.FlutterPluginBinding? = null
     private var progressSink: EventChannel.EventSink? = null
+    private var receiverRegistered = false
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val executor: Executor = Executors.newSingleThreadExecutor()
+
+    // --- Executors -----------------------------------------------------------
+    // Bucket size of the parallel work pools: keep small enough not to starve
+    // the UI/decoder threads, large enough to keep flash storage busy.
+    private val workerCount: Int = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+
+    private val coordinatorExecutor: ExecutorService =
+        Executors.newSingleThreadExecutor { r -> Thread(r, "apk-scan").apply { isDaemon = true } }
+
+    private val workerPool: ExecutorService =
+        Executors.newFixedThreadPool(workerCount) { r -> Thread(r, "apk-worker").apply { isDaemon = true } }
+
+    private val ioExecutor: ExecutorService =
+        Executors.newFixedThreadPool(2) { r -> Thread(r, "apk-io").apply { isDaemon = true } }
+
+    // --- Scan state ----------------------------------------------------------
+    /** Incremented whenever a scan starts or is cancelled; stale scans abort. */
+    @Volatile
+    private var scanGeneration = 0
+
+    private val parsedCount = AtomicInteger(0)
+    private val discoveredCount = AtomicInteger(0)
+
+    private val progressLock = Any()
+    private val pendingBatch = ArrayList<Map<String, Any?>>(64)
+
+    @Volatile
+    private var lastProgressAt = 0L
+
+    @Volatile
+    private var currentDir = ""
 
     private val packageRemovedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -70,7 +118,25 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         private const val INSTALL_REQUEST_CODE = 1001
         private const val MANAGE_STORAGE_REQUEST_CODE = 1002
         private const val INSTALL_PERMISSION_REQUEST_CODE = 1003
-        private val SKIP_DIRS = setOf("/Android/data", "/Android/obb")
+
+        /** Directories that are unreadable on Android 11+ (skipped for speed). */
+        private val SKIP_DIR_SUFFIXES = listOf("/Android/data", "/Android/obb")
+
+        /** Max directory depth — guards against symlink loops in odd filesystems. */
+        private const val MAX_SCAN_DEPTH = 48
+
+        /** Progress events are flushed at most this often (ms) or per batch size. */
+        private const val PROGRESS_INTERVAL_MS = 140L
+        private const val PROGRESS_BATCH_SIZE = 24
+
+        /** Icons are downscaled to this many pixels on the longest edge. */
+        private const val ICON_MAX_SIZE_PX = 128
+
+        /** Icons not touched for this long are pruned from the cache. */
+        private const val ICON_CACHE_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
+
+        /** Larger copy buffer than the default 8 KB — noticeably faster copies. */
+        private const val COPY_BUFFER_SIZE = 1 shl 17
     }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -79,6 +145,8 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         channel.setMethodCallHandler(this)
         progressChannel = EventChannel(binding.binaryMessenger, PROGRESS_CHANNEL_NAME)
         progressChannel.setStreamHandler(progressStreamHandler)
+        // Housekeeping: drop icons of APKs/apps that were removed long ago.
+        ioExecutor.execute { pruneIconCache() }
     }
 
     private val progressStreamHandler = object : EventChannel.StreamHandler {
@@ -100,20 +168,52 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         activity = binding.activity
         binding.addActivityResultListener(this)
         binding.addRequestPermissionsResultListener(this)
-        val filter = IntentFilter(Intent.ACTION_PACKAGE_REMOVED).apply { addDataScheme("package") }
-        activity?.registerReceiver(packageRemovedReceiver, filter)
+        registerPackageRemovedReceiver(binding.activity)
     }
 
     override fun onDetachedFromActivityForConfigChanges() { activity = null }
+
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
         binding.addActivityResultListener(this)
         binding.addRequestPermissionsResultListener(this)
+        registerPackageRemovedReceiver(binding.activity)
     }
 
     override fun onDetachedFromActivity() {
-        activity?.unregisterReceiver(packageRemovedReceiver)
+        unregisterPackageRemovedReceiver()
         activity = null
+    }
+
+    private fun registerPackageRemovedReceiver(context: Context) {
+        if (receiverRegistered) return
+        val filter = IntentFilter(Intent.ACTION_PACKAGE_REMOVED).apply { addDataScheme("package") }
+        receiverRegistered = try {
+            ContextCompat.registerReceiver(
+                context,
+                packageRemovedReceiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+            true
+        } catch (_: Exception) {
+            try {
+                context.registerReceiver(packageRemovedReceiver, filter)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
+    private fun unregisterPackageRemovedReceiver() {
+        if (!receiverRegistered) return
+        try {
+            activity?.unregisterReceiver(packageRemovedReceiver)
+        } catch (_: Exception) {
+            // Receiver was already unregistered (e.g. process recreation).
+        }
+        receiverRegistered = false
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -141,38 +241,345 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         } else false
     }
 
-    private fun requireActivity(): Activity = activity ?: throw IllegalStateException("Activity not available")
-    private fun requirePackageManager(): PackageManager = requireActivity().packageManager
     private fun getContext(): Context? = activity ?: flutterPluginBinding?.applicationContext
+    private fun packageManager(): PackageManager? =
+        activity?.packageManager ?: flutterPluginBinding?.applicationContext?.packageManager
 
-    private inline fun <T> runBackground(crossinline block: () -> T, crossinline onSuccess: (T) -> Unit, crossinline onError: (String) -> Unit = { msg -> }) {
-        executor.execute {
-            try {
-                val result = block()
-                mainHandler.post { onSuccess(result) }
-            } catch (e: Exception) {
-                mainHandler.post { onError(e.message ?: "Unknown error") }
-            }
-        }
-    }
+    private fun versionCodeOf(info: PackageInfo): Long =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+        else @Suppress("DEPRECATION") info.versionCode.toLong()
 
-    private fun sendProgress(type: String, filesFound: Int, currentDir: String, apkInfo: Map<String, Any?>? = null) {
+    // ------------------------------------------------------------------------
+    // Progress reporting (batched + throttled)
+    // ------------------------------------------------------------------------
+
+    private fun sendProgress(type: String, filesFound: Int, dir: String, apks: List<Map<String, Any?>>? = null) {
+        if (progressSink == null) return
         val event = mutableMapOf<String, Any?>(
             "type" to type,
             "filesFound" to filesFound,
-            "currentDir" to currentDir
+            "currentDir" to dir,
         )
-        apkInfo?.let { event["apk"] = it }
+        if (!apks.isNullOrEmpty()) event["apks"] = apks
         mainHandler.post { progressSink?.success(event) }
     }
 
+    /**
+     * Buffers one parsed APK (and/or the directory currently being walked) and
+     * flushes a batch when either the time window or the batch size is reached.
+     * Call with [force] = true for the final batch so nothing is left buffered.
+     */
+    private fun emitProgress(
+        apk: Map<String, Any?>? = null,
+        dir: String? = null,
+        discovered: Boolean = false,
+        force: Boolean = false,
+    ) {
+        var flush = force
+        var batch: List<Map<String, Any?>>? = null
+        var count = 0
+        synchronized(progressLock) {
+            if (apk != null) {
+                pendingBatch.add(apk)
+                parsedCount.incrementAndGet()
+            }
+            if (!dir.isNullOrEmpty()) currentDir = dir
+            if (!flush) {
+                val now = System.currentTimeMillis()
+                flush = pendingBatch.size >= PROGRESS_BATCH_SIZE ||
+                    (now - lastProgressAt) >= PROGRESS_INTERVAL_MS
+            }
+            if (flush) {
+                lastProgressAt = System.currentTimeMillis()
+                if (pendingBatch.isNotEmpty()) {
+                    batch = ArrayList(pendingBatch)
+                    pendingBatch.clear()
+                }
+                count = if (discovered) discoveredCount.get() else parsedCount.get()
+            }
+        }
+        if (flush) sendProgress("progress", count, currentDir, batch)
+    }
+
+    // ------------------------------------------------------------------------
+    // Icon cache
+    // ------------------------------------------------------------------------
+
     private fun getIconCacheDir(): File {
-        val dir = File(flutterPluginBinding?.applicationContext?.cacheDir, "apk_icons")
+        val base = getContext()?.cacheDir ?: flutterPluginBinding?.applicationContext?.cacheDir
+        val dir = if (base != null) File(base, "apk_icons") else File("apk_icons")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
 
-    private fun shouldSkipDir(path: String): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && SKIP_DIRS.any { path.contains(it) }
+    private fun iconPrefix(baseName: String): String =
+        baseName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(64) + "_"
+
+    private fun iconFileFor(cacheDir: File, baseName: String, stamp: Long): File =
+        File(cacheDir, "${iconPrefix(baseName)}$stamp" + "_icon.png")
+
+    /** Removes icons that have not been used for [ICON_CACHE_MAX_AGE_MS]. */
+    private fun pruneIconCache() {
+        try {
+            val dir = getIconCacheDir()
+            val cutoff = System.currentTimeMillis() - ICON_CACHE_MAX_AGE_MS
+            dir.listFiles()?.forEach { file ->
+                if (file.isFile && file.lastModified() < cutoff) file.delete()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Loads an app/APK icon and writes a downscaled PNG into the cache.
+     *
+     * The cache key contains [stamp] (APK mtime / package update time), so a
+     * cached icon is reused without decoding when nothing changed — this is a
+     * large win when re-scanning or reopening the installed-apps list.
+     */
+    private fun loadIconFile(
+        appInfo: ApplicationInfo,
+        pm: PackageManager,
+        cacheDir: File,
+        baseName: String,
+        stamp: Long,
+    ): File? {
+        val target = iconFileFor(cacheDir, baseName, stamp)
+        if (target.exists() && target.length() > 0L) return target
+        val drawable: Drawable = try {
+            appInfo.loadIcon(pm)
+        } catch (_: Exception) {
+            return null
+        }
+        return writeIcon(drawable, target)
+    }
+
+    private fun writeIcon(drawable: Drawable, target: File): File? = try {
+        val intrinsicW = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else ICON_MAX_SIZE_PX
+        val intrinsicH = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else ICON_MAX_SIZE_PX
+        val longest = maxOf(intrinsicW, intrinsicH)
+        val scale = if (longest > ICON_MAX_SIZE_PX) ICON_MAX_SIZE_PX.toFloat() / longest else 1f
+        val outW = maxOf(1, (intrinsicW * scale).toInt())
+        val outH = maxOf(1, (intrinsicH * scale).toInt())
+
+        // Always draw into a fresh, small bitmap: never mutate the (possibly
+        // shared / hardware backed) bitmap owned by the drawable.
+        val bitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, outW, outH)
+        drawable.draw(canvas)
+
+        FileOutputStream(target).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
+        target
+    } catch (_: Exception) {
+        try {
+            target.delete()
+        } catch (_: Exception) {
+        }
+        null
+    }
+
+    // ------------------------------------------------------------------------
+    // Scanning
+    // ------------------------------------------------------------------------
+
+    private fun isSkippedDir(dir: File, depth: Int): Boolean {
+        if (depth > MAX_SCAN_DEPTH) return true
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        val path = dir.absolutePath
+        for (suffix in SKIP_DIR_SUFFIXES) {
+            if (path.endsWith(suffix) || path.contains("$suffix/")) return true
+        }
+        return false
+    }
+
+    private fun isActive(generation: Int): Boolean = generation == scanGeneration
+
+    private fun resetScanState() {
+        parsedCount.set(0)
+        discoveredCount.set(0)
+        synchronized(progressLock) {
+            pendingBatch.clear()
+            lastProgressAt = 0L
+        }
+    }
+
+    /** Cancels a running scan: the in-flight scan returns its partial results. */
+    private fun cancelScan(result: Result) {
+        scanGeneration++
+        synchronized(progressLock) { pendingBatch.clear() }
+        result.success(true)
+    }
+
+    /**
+     * Walks [root] iteratively (no recursion → no stack overflow on deep trees)
+     * and collects every readable `.apk` file. Publishes discovery progress.
+     */
+    private fun collectApkFiles(root: File, generation: Int): List<File> {
+        val found = ArrayList<File>(128)
+        if (!root.exists() || !root.isDirectory) return found
+
+        val queue = ArrayDeque<Pair<File, Int>>()
+        queue.addLast(root to 0)
+        var dirsSinceReport = 0
+
+        while (queue.isNotEmpty()) {
+            if (!isActive(generation)) break
+            val (dir, depth) = queue.removeFirst()
+            if (isSkippedDir(dir, depth)) continue
+
+            dirsSinceReport++
+            if (dirsSinceReport >= 16) {
+                dirsSinceReport = 0
+                emitProgress(dir = dir.absolutePath, discovered = true)
+            }
+
+            val children = try {
+                dir.listFiles()
+            } catch (_: SecurityException) {
+                null
+            } catch (_: Exception) {
+                null
+            }
+            if (children == null) continue
+
+            for (child in children) {
+                val name = child.name
+                if (child.isDirectory) {
+                    if (name != "." && name != "..") queue.addLast(child to (depth + 1))
+                } else if (child.isFile && name.length > 4 && name.endsWith(".apk", ignoreCase = true)) {
+                    if (child.length() > 0L) {
+                        found.add(child)
+                        discoveredCount.incrementAndGet()
+                    }
+                }
+            }
+        }
+        return found
+    }
+
+    /**
+     * Parses [files] in parallel across [workerPool], emitting batched progress.
+     * Stops early (returning partial results) if the scan generation changed.
+     */
+    private fun parseApksParallel(
+        files: List<File>,
+        generation: Int,
+        emit: Boolean = true,
+    ): List<Map<String, Any?>> {
+        if (files.isEmpty()) return emptyList()
+        val iconCacheDir = getIconCacheDir()
+        val parsed = ArrayList<Map<String, Any?>>(files.size)
+
+        mapParallel(files) { file ->
+            if (!isActive(generation)) return@mapParallel null
+            try {
+                val info = parseApkInfo(file, iconCacheDir)
+                if (emit) emitProgress(apk = info) else parsedCount.incrementAndGet()
+                info
+            } catch (_: Exception) {
+                // Unreadable / corrupt APK — skip instead of failing the scan.
+                null
+            }
+        }.forEach { info ->
+            if (info != null) parsed.add(info)
+        }
+        return parsed
+    }
+
+    /**
+     * Runs [transform] over [items] in parallel on [workerPool].
+     *
+     * Workers pull items from a shared cursor (dynamic load balancing, so one
+     * huge APK can't stall a whole static chunk) and results are collected in a
+     * synchronized list. Order is not preserved — every caller sorts or
+     * aggregates afterwards.
+     */
+    private fun <T, R> mapParallel(items: List<T>, transform: (T) -> R?): List<R> {
+        if (items.isEmpty()) return emptyList()
+        val workerTotal = minOf(workerCount, items.size)
+        val cursor = AtomicInteger(0)
+        val out = Collections.synchronizedList(ArrayList<R>(items.size))
+        val latch = CountDownLatch(workerTotal)
+
+        repeat(workerTotal) {
+            workerPool.execute {
+                try {
+                    while (true) {
+                        val index = cursor.getAndIncrement()
+                        if (index >= items.size) break
+                        val value = try {
+                            transform(items[index])
+                        } catch (_: Exception) {
+                            null
+                        }
+                        if (value != null) out.add(value)
+                    }
+                } finally {
+                    latch.countDown()
+                }
+            }
+        }
+
+        try {
+            latch.await()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        return ArrayList(out)
+    }
+
+    private fun startScan(result: Result) {
+        val generation = ++scanGeneration
+        resetScanState()
+        val completed = AtomicBoolean(false)
+        val succeed: (List<Map<String, Any?>>) -> Unit = { list ->
+            if (completed.compareAndSet(false, true)) mainHandler.post { result.success(list) }
+        }
+        val fail: (String, String) -> Unit = { code, message ->
+            if (completed.compareAndSet(false, true)) mainHandler.post { result.error(code, message, null) }
+        }
+
+        coordinatorExecutor.execute {
+            val root = Environment.getExternalStorageDirectory()
+            try {
+                sendProgress("start", 0, root.absolutePath)
+                val candidates = collectApkFiles(root, generation)
+                val parsed = if (candidates.isEmpty()) {
+                    emptyList()
+                } else {
+                    parseApksParallel(candidates, generation)
+                }
+                emitProgress(force = true)
+                sendProgress("complete", parsed.size, "")
+                succeed(parsed)
+            } catch (e: Exception) {
+                sendProgress("error", parsedCount.get(), e.message ?: "Unknown error")
+                fail("SCAN_ERROR", "Failed to scan APK files: ${e.message}")
+            }
+        }
+    }
+
+    /** One-shot scan without progress events (kept for API compatibility). */
+    private fun scanApkFiles(result: Result) {
+        val generation = ++scanGeneration
+        resetScanState()
+        val completed = AtomicBoolean(false)
+        coordinatorExecutor.execute {
+            try {
+                val root = Environment.getExternalStorageDirectory()
+                val candidates = collectApkFiles(root, generation)
+                val parsed = if (candidates.isEmpty()) emptyList() else parseApksParallel(candidates, generation, emit = false)
+                if (completed.compareAndSet(false, true)) mainHandler.post { result.success(parsed) }
+            } catch (e: Exception) {
+                if (completed.compareAndSet(false, true)) {
+                    mainHandler.post { result.error("SCAN_ERROR", "Failed to scan APK files: ${e.message}", null) }
+                }
+            }
+        }
+    }
 
     private fun parseApkInfo(file: File, iconCacheDir: File): Map<String, Any?> {
         val result = mutableMapOf<String, Any?>()
@@ -181,35 +588,52 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         result["size"] = file.length()
         result["lastModified"] = file.lastModified()
 
-        val pm = activity?.packageManager ?: flutterPluginBinding?.applicationContext?.packageManager ?: return result.apply { setFallbackInfo(file) }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_META_DATA else PackageManager.GET_SIGNATURES
+        val pm = packageManager()
+        if (pm == null) {
+            result.setFallbackInfo(file)
+            return result
+        }
 
+        // Lightweight parse: the list only needs label/package/version, so we
+        // skip metadata + signature extraction (a large per-file speed up).
         val packageInfo = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                pm.getPackageArchiveInfo(file.absolutePath, PackageManager.PackageInfoFlags.of(flags.toLong()))
+                pm.getPackageArchiveInfo(file.absolutePath, PackageManager.PackageInfoFlags.of(0L))
             } else {
                 @Suppress("DEPRECATION")
-                pm.getPackageArchiveInfo(file.absolutePath, flags)
+                pm.getPackageArchiveInfo(file.absolutePath, 0)
             }
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            null
+        }
 
         if (packageInfo == null) {
             result.setFallbackInfo(file)
             return result
         }
 
-        packageInfo.applicationInfo?.let { appInfo ->
+        val appInfo = packageInfo.applicationInfo
+        if (appInfo != null) {
             appInfo.sourceDir = file.absolutePath
             appInfo.publicSourceDir = file.absolutePath
-            result["appName"] = appInfo.loadLabel(pm).toString()
+            result["appName"] = try {
+                appInfo.loadLabel(pm).toString()
+            } catch (_: Exception) {
+                file.nameWithoutExtension
+            }
             try {
-                saveIconToFile(appInfo.loadIcon(pm), iconCacheDir, file.nameWithoutExtension)?.absolutePath?.let { result["iconPath"] = it }
-            } catch (_: Exception) {}
-        } ?: result.setFallbackInfo(file)
+                loadIconFile(appInfo, pm, iconCacheDir, file.nameWithoutExtension, file.lastModified())
+                    ?.absolutePath
+                    ?.let { result["iconPath"] = it }
+            } catch (_: Exception) {
+            }
+        } else {
+            result.setFallbackInfo(file)
+        }
 
-        result["packageName"] = packageInfo.packageName
+        result["packageName"] = packageInfo.packageName ?: "unknown"
         result["versionName"] = packageInfo.versionName ?: "Unknown"
-        result["versionCode"] = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) packageInfo.longVersionCode else @Suppress("DEPRECATION") packageInfo.versionCode.toLong()
+        result["versionCode"] = versionCodeOf(packageInfo)
         return result
     }
 
@@ -220,39 +644,8 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         this["versionCode"] = 0L
     }
 
-    private fun saveIconToFile(drawable: Drawable, cacheDir: File, baseName: String): File? = try {
-        val bitmap = (drawable as? BitmapDrawable)?.bitmap ?: run {
-            val w = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 96
-            val h = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 96
-            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { Canvas(it).apply { drawable.setBounds(0, 0, w, h); drawable.draw(this) } }
-        }
-        val safeName = baseName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-        File(cacheDir, "${safeName}_icon.png").apply {
-            FileOutputStream(this).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        }
-    } catch (_: Exception) { null }
-
-    private fun scanDirectory(directory: File, apkList: MutableList<Map<String, Any?>>, iconCacheDir: File, withProgress: Boolean = false) {
-        if (!directory.exists() || !directory.isDirectory || !directory.canRead()) return
-        try {
-            directory.listFiles()?.forEach { file ->
-                when {
-                    file.isDirectory && !shouldSkipDir(file.absolutePath) -> {
-                        if (withProgress) sendProgress("progress", apkList.size, file.absolutePath)
-                        scanDirectory(file, apkList, iconCacheDir, withProgress)
-                    }
-                    file.isFile && file.name.endsWith(".apk", true) -> {
-                        val apkInfo = parseApkInfo(file, iconCacheDir)
-                        apkList.add(apkInfo)
-                        if (withProgress) sendProgress("progress", apkList.size, file.parent ?: "", apkInfo)
-                    }
-                }
-            }
-        } catch (_: SecurityException) {}
-    }
-
     private fun sanitizeFileName(name: String, maxLen: Int = 120): String {
-        val cleaned = name.trim().replace(Regex("[<>:\"/\\\\|?*\u0000-\u001F]"), "_").replace(Regex("\\s+"), "_").replace(Regex("_+"), "_").trim('.', '_', ' ')
+        val cleaned = name.trim().replace(Regex("[<>:\"/\\\\|?*\\u0000-\\u001F]"), "_").replace(Regex("\\s+"), "_").replace(Regex("_+"), "_").trim('.', '_', ' ')
         return if (cleaned.isBlank()) "unknown" else cleaned.take(maxLen)
     }
 
@@ -272,37 +665,23 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
-            "scanApkFiles" -> runBackground(
-                block = { mutableListOf<Map<String, Any?>>().apply { scanDirectory(Environment.getExternalStorageDirectory(), this, getIconCacheDir()) } },
-                onSuccess = { result.success(it) },
-                onError = { result.error("SCAN_ERROR", "Failed to scan APK files: $it", null) }
-            )
-            "scanApkFilesWithProgress" -> executor.execute {
-                try {
-                    val apkList = mutableListOf<Map<String, Any?>>()
-                    sendProgress("start", 0, Environment.getExternalStorageDirectory().absolutePath)
-                    scanDirectory(Environment.getExternalStorageDirectory(), apkList, getIconCacheDir(), true)
-                    sendProgress("complete", apkList.size, "")
-                    mainHandler.post { result.success(apkList) }
-                } catch (e: Exception) {
-                    sendProgress("error", 0, e.message ?: "Unknown error")
-                    mainHandler.post { result.error("SCAN_ERROR", "Failed to scan APK files: ${e.message}", null) }
-                }
-            }
+            "scanApkFiles" -> scanApkFiles(result)
+            "scanApkFilesWithProgress" -> startScan(result)
+            "cancelScan" -> cancelScan(result)
             "installApk" -> installApk(call.argument<String>("path"), result)
-            "deleteApk" -> executor.execute { deleteApk(call.argument<String>("path"), result) }
+            "deleteApk" -> ioExecutor.execute { deleteApk(call.argument<String>("path"), result) }
             "renameApk" -> renameApk(call.argument<String>("path"), call.argument<String>("newName"), result)
             "moveApk" -> moveApk(call.argument<String>("sourcePath"), call.argument<String>("destDir"), result)
             "checkStoragePermission" -> result.success(checkStoragePermission())
             "canInstallPackages" -> result.success(canInstallPackages())
             "requestStoragePermission" -> requestStoragePermission(result)
             "requestInstallPermission" -> requestInstallPermission(result)
-            "getDirectories" -> executor.execute {
+            "getDirectories" -> ioExecutor.execute {
                 val dirs = getDirectories()
                 mainHandler.post { result.success(dirs) }
             }
-            "getSubdirectories" -> executor.execute { getSubdirectories(call.argument<String>("parentPath"), result) }
-            "createDirectory" -> executor.execute { createDirectory(call.argument<String>("parentPath"), call.argument<String>("folderName"), result) }
+            "getSubdirectories" -> ioExecutor.execute { getSubdirectories(call.argument<String>("parentPath"), result) }
+            "createDirectory" -> ioExecutor.execute { createDirectory(call.argument<String>("parentPath"), call.argument<String>("folderName"), result) }
             "scanDirectoryForApks" -> scanDirectoryForApks(call.argument<String>("dirPath"), result)
             "detectDuplicates" -> detectDuplicates(call.argument<List<String>>("filePaths"), result)
             "getInstalledApps" -> getInstalledApps(call.argument<Boolean>("includeSystem") ?: false, result)
@@ -318,7 +697,7 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     }
 
     private fun getApkDetail(path: String?, result: Result) {
-        executor.execute {
+        ioExecutor.execute {
             try {
                 val file = File(path ?: throw IllegalArgumentException("path is required"))
                 if (!file.exists()) throw IllegalArgumentException("File not found: $path")
@@ -344,7 +723,7 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
                 detail["packageName"] = packageInfo.packageName ?: ""
                 detail["versionName"] = packageInfo.versionName ?: "Unknown"
-                detail["versionCode"] = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) packageInfo.longVersionCode else @Suppress("DEPRECATION") packageInfo.versionCode.toLong()
+                detail["versionCode"] = versionCodeOf(packageInfo)
 
                 val permissions = packageInfo.requestedPermissions?.toList() ?: emptyList()
                 val permissionFlags = packageInfo.requestedPermissionsFlags
@@ -356,22 +735,32 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 }
                 detail["permissions"] = permissionDetails
 
-                packageInfo.applicationInfo?.let { appInfo ->
+                val appInfo = packageInfo.applicationInfo
+                if (appInfo != null) {
                     appInfo.sourceDir = file.absolutePath
                     appInfo.publicSourceDir = file.absolutePath
-                    detail["appName"] = appInfo.loadLabel(pm).toString()
+                    detail["appName"] = try {
+                        appInfo.loadLabel(pm).toString()
+                    } catch (_: Exception) {
+                        file.nameWithoutExtension
+                    }
                     detail["minSdkVersion"] = appInfo.minSdkVersion
                     detail["targetSdkVersion"] = appInfo.targetSdkVersion
                     try {
-                        saveIconToFile(appInfo.loadIcon(pm), getIconCacheDir(), file.nameWithoutExtension)?.absolutePath?.let { detail["iconPath"] = it }
-                    } catch (_: Exception) {}
+                        loadIconFile(appInfo, pm, getIconCacheDir(), file.nameWithoutExtension, file.lastModified())
+                            ?.absolutePath
+                            ?.let { detail["iconPath"] = it }
+                    } catch (_: Exception) {
+                    }
+                } else {
+                    detail["appName"] = file.nameWithoutExtension
                 }
 
                 val abis = mutableListOf<String>()
                 try {
                     ZipFile(file).use { zip ->
                         val entries = zip.entries()
-                        val libDirs = mutableSetOf<String>()
+                        val libDirs = sortedSetOf<String>()
                         while (entries.hasMoreElements()) {
                             val entry = entries.nextElement()
                             val name = entry.name
@@ -384,7 +773,8 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                         }
                         abis.addAll(libDirs)
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
                 detail["supportedAbis"] = abis
 
                 try {
@@ -401,7 +791,7 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                         val sigs = packageInfo.signatures
                         if (sigs != null && sigs.isNotEmpty()) {
                             val digest = MessageDigest.getInstance("SHA-256")
-                            digest.update(sigs[0].toByteArray())
+                            for (sig in sigs) { digest.update(sig.toByteArray()) }
                             bytesToHex(digest.digest())
                         } else null
                     }
@@ -520,34 +910,60 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     }
 
     private fun deleteApk(path: String?, result: Result) {
-        if (path == null) {
+        if (path.isNullOrEmpty()) {
             mainHandler.post { result.error("INVALID_ARGUMENT", "Path is required", null) }
             return
         }
-        val file = File(path)
-        if (!file.exists()) {
-            mainHandler.post { result.error("FILE_NOT_FOUND", "APK file not found: $path", null) }
-            return
+        try {
+            val file = File(path)
+            if (!file.exists()) {
+                mainHandler.post { result.error("FILE_NOT_FOUND", "APK file not found: $path", null) }
+                return
+            }
+            val deleted = file.delete()
+            if (deleted) {
+                mainHandler.post { result.success(mapOf("success" to true, "path" to path)) }
+            } else {
+                // Never report success: the Dart layer drops deleted entries from
+                // the list, so a silent failure would desync the UI from storage.
+                mainHandler.post {
+                    result.error("DELETE_FAILED", "Could not delete the file. Check storage permission and try again.", null)
+                }
+            }
+        } catch (e: Exception) {
+            mainHandler.post { result.error("DELETE_FAILED", "Failed to delete APK: ${e.message}", null) }
         }
-        val deleted = file.delete()
-        mainHandler.post {
-            result.success(if (deleted) mapOf("success" to true, "path" to path) else mapOf("success" to false))
+    }
+
+    /** Copies [source] to [dest] with a large buffer; verifies the result. */
+    private fun copyFile(source: File, dest: File): Boolean {
+        return try {
+            source.inputStream().use { input ->
+                FileOutputStream(dest).use { output ->
+                    input.copyTo(output, COPY_BUFFER_SIZE)
+                    output.flush()
+                }
+            }
+            dest.exists() && dest.length() == source.length()
+        } catch (_: Exception) {
+            try { dest.delete() } catch (_: Exception) {}
+            false
         }
     }
 
     private fun renameApk(path: String?, newName: String?, result: Result) {
-        executor.execute {
+        ioExecutor.execute {
             try {
                 val file = File(path ?: throw IllegalArgumentException("Path is required"))
                 if (!file.exists()) throw IllegalArgumentException("APK file not found: $path")
-                
+
                 val finalName = sanitizeFileName(newName ?: throw IllegalArgumentException("newName is required")).let {
                     if (it.endsWith(".apk", true)) it else "$it.apk"
                 }
-                
+
                 val parentDir = file.parentFile ?: throw IllegalArgumentException("Invalid parent directory")
                 val newFile = uniqueFile(parentDir, finalName, file.absolutePath)
-                
+
                 if (newFile.absolutePath == file.absolutePath) {
                     mainHandler.post {
                         result.success(mapOf("success" to true, "oldPath" to path, "newPath" to file.absolutePath, "newName" to file.name))
@@ -555,32 +971,31 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     return@execute
                 }
 
-                val renamed = file.renameTo(newFile)
-                if (renamed) {
+                if (file.renameTo(newFile)) {
+                    mainHandler.post {
+                        result.success(mapOf("success" to true, "oldPath" to path, "newPath" to newFile.absolutePath, "newName" to newFile.name))
+                    }
+                    return@execute
+                }
+
+                // Fallback: copy and delete (different filesystem / bind mount).
+                if (!copyFile(file, newFile)) {
+                    mainHandler.post {
+                        result.error("RENAME_FAILED", "Failed to rename APK file: copy verification failed", null)
+                    }
+                    return@execute
+                }
+                val deleted = file.delete()
+                if (deleted) {
                     mainHandler.post {
                         result.success(mapOf("success" to true, "oldPath" to path, "newPath" to newFile.absolutePath, "newName" to newFile.name))
                     }
                 } else {
-                    // Fallback: copy and delete
-                    try {
-                        file.copyTo(newFile, overwrite = false)
-                        if (newFile.exists() && newFile.length() == file.length()) {
-                            val deleted = file.delete()
-                            if (deleted) {
-                                mainHandler.post {
-                                    result.success(mapOf("success" to true, "oldPath" to path, "newPath" to newFile.absolutePath, "newName" to newFile.name))
-                                }
-                            } else {
-                                throw Exception("Failed to delete original file after copy")
-                            }
-                        } else {
-                            newFile.delete()
-                            throw Exception("Copy verification failed")
-                        }
-                    } catch (e: Exception) {
-                        mainHandler.post {
-                            result.error("RENAME_FAILED", "Failed to rename APK file: ${e.message}", null)
-                        }
+                    // Keep storage consistent: roll the copy back so the caller
+                    // does not end up with two identical files.
+                    newFile.delete()
+                    mainHandler.post {
+                        result.error("RENAME_FAILED", "Failed to delete original file after copy", null)
                     }
                 }
             } catch (e: Exception) {
@@ -592,45 +1007,57 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     }
 
     private fun moveApk(sourcePath: String?, destDir: String?, result: Result) {
-        executor.execute {
+        ioExecutor.execute {
             try {
                 val source = File(sourcePath ?: throw IllegalArgumentException("sourcePath is required"))
                 if (!source.exists()) throw IllegalArgumentException("Source file not found: $sourcePath")
-                
+
                 val destDirFile = File(destDir ?: throw IllegalArgumentException("destDir is required"))
                 if (!destDirFile.exists() && !destDirFile.mkdirs()) {
                     throw IllegalArgumentException("Failed to create destination: $destDir")
                 }
 
+                if (destDirFile.absolutePath == source.parentFile?.absolutePath) {
+                    // Nothing to do — report it so the UI does not claim a move.
+                    mainHandler.post {
+                        result.success(
+                            mapOf(
+                                "success" to true,
+                                "sourcePath" to sourcePath,
+                                "destPath" to source.absolutePath,
+                                "conflictResolved" to false,
+                                "skipped" to true,
+                            )
+                        )
+                    }
+                    return@execute
+                }
+
                 val destFile = uniqueFile(destDirFile, source.name, source.absolutePath)
                 val conflictResolved = destFile.name != source.name
-                val moved = source.renameTo(destFile)
 
-                if (moved) {
+                if (source.renameTo(destFile)) {
                     mainHandler.post {
-                        result.success(mapOf("success" to true, "sourcePath" to sourcePath, "destPath" to destFile.absolutePath, "conflictResolved" to conflictResolved))
+                        result.success(mapOf("success" to true, "sourcePath" to sourcePath, "destPath" to destFile.absolutePath, "conflictResolved" to conflictResolved, "skipped" to false))
+                    }
+                    return@execute
+                }
+
+                // Fallback: copy and delete (e.g. moving to another volume).
+                if (!copyFile(source, destFile)) {
+                    mainHandler.post {
+                        result.error("MOVE_FAILED", "Failed to move APK file: copy verification failed", null)
+                    }
+                    return@execute
+                }
+                if (source.delete()) {
+                    mainHandler.post {
+                        result.success(mapOf("success" to true, "sourcePath" to sourcePath, "destPath" to destFile.absolutePath, "conflictResolved" to conflictResolved, "skipped" to false))
                     }
                 } else {
-                    // Fallback: copy and delete
-                    try {
-                        source.copyTo(destFile, overwrite = false)
-                        if (destFile.exists() && destFile.length() == source.length()) {
-                            val deleted = source.delete()
-                            if (deleted) {
-                                mainHandler.post {
-                                    result.success(mapOf("success" to true, "sourcePath" to sourcePath, "destPath" to destFile.absolutePath, "conflictResolved" to conflictResolved))
-                                }
-                            } else {
-                                throw Exception("Failed to delete source file after copy")
-                            }
-                        } else {
-                            destFile.delete()
-                            throw Exception("Copy verification failed")
-                        }
-                    } catch (e: Exception) {
-                        mainHandler.post {
-                            result.error("MOVE_FAILED", "Failed to move APK file: ${e.message}", null)
-                        }
+                    destFile.delete()
+                    mainHandler.post {
+                        result.error("MOVE_FAILED", "Failed to delete source file after copy", null)
                     }
                 }
             } catch (e: Exception) {
@@ -641,15 +1068,52 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         }
     }
 
+    /**
+     * Storage roots for the directory picker: internal storage first, then any
+     * removable/secondary volumes, then the top level folders of the primary
+     * volume.
+     */
     private fun getDirectories(): List<Map<String, String>> {
-        val ext = Environment.getExternalStorageDirectory()
-        val dirs = mutableListOf<Map<String, String>>().apply {
-            add(mapOf("name" to "Internal Storage", "path" to ext.absolutePath))
-            ext.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name.lowercase() }?.forEach {
-                add(mapOf("name" to it.name, "path" to it.absolutePath))
-            }
+        val dirs = LinkedHashMap<String, Map<String, String>>()
+        val primary = Environment.getExternalStorageDirectory()
+        dirs[primary.absolutePath] = mapOf("name" to "Internal Storage", "path" to primary.absolutePath)
+
+        try {
+            getContext()?.getExternalFilesDirs(null)
+                ?.filterNotNull()
+                ?.forEach { filesDir ->
+                    val root = storageRootOf(filesDir.absolutePath) ?: return@forEach
+                    if (!dirs.containsKey(root)) {
+                        dirs[root] = mapOf("name" to storageLabel(root), "path" to root)
+                    }
+                }
+        } catch (_: Exception) {
         }
-        return dirs
+
+        try {
+            primary.listFiles()
+                ?.filter { it.isDirectory }
+                ?.sortedBy { it.name.lowercase() }
+                ?.forEach { dirs.putIfAbsent(it.absolutePath, mapOf("name" to it.name, "path" to it.absolutePath)) }
+        } catch (_: Exception) {
+        }
+
+        return dirs.values.toList()
+    }
+
+    /** `/storage/XXXX-XXXX/Android/data/<pkg>/files` → `/storage/XXXX-XXXX`. */
+    private fun storageRootOf(path: String): String? {
+        val index = path.indexOf("/Android/")
+        return if (index > 0) path.substring(0, index) else null
+    }
+
+    private fun storageLabel(root: String): String {
+        val fallback = root.substringAfterLast('/').ifEmpty { root }
+        return try {
+            if (Environment.isExternalStorageRemovable(File(root))) "SD Card" else fallback
+        } catch (_: Exception) {
+            fallback
+        }
     }
 
     private fun checkStoragePermission(): Boolean {
@@ -675,9 +1139,18 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         pendingStoragePermissionResult = result
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                act.startActivityForResult(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                val appIntent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                     setData(Uri.parse("package:${act.packageName}"))
-                }, MANAGE_STORAGE_REQUEST_CODE)
+                }
+                try {
+                    act.startActivityForResult(appIntent, MANAGE_STORAGE_REQUEST_CODE)
+                } catch (_: Exception) {
+                    // Some OEM builds only expose the global "all files" screen.
+                    act.startActivityForResult(
+                        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+                        MANAGE_STORAGE_REQUEST_CODE,
+                    )
+                }
             } else {
                 act.requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE, android.Manifest.permission.WRITE_EXTERNAL_STORAGE), MANAGE_STORAGE_REQUEST_CODE)
             }
@@ -709,7 +1182,11 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             mainHandler.post { result.error("INVALID_PATH", "Directory does not exist", null) }
             return
         }
-        val subdirs = dir.listFiles()?.filter { it.isDirectory && it.canRead() }?.sortedBy { it.name.lowercase() }?.map { mapOf("name" to it.name, "path" to it.absolutePath) } ?: emptyList<Map<String, String>>()
+        val subdirs = dir.listFiles()
+            ?.filter { it.isDirectory && it.canRead() }
+            ?.sortedBy { it.name.lowercase() }
+            ?.map { mapOf("name" to it.name, "path" to it.absolutePath) }
+            ?: emptyList()
         mainHandler.post { result.success(subdirs) }
     }
 
@@ -741,25 +1218,31 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     }
 
     private fun scanDirectoryForApks(dirPath: String?, result: Result) {
-        executor.execute {
+        ioExecutor.execute {
             val dir = dirPath?.let { File(it) }
             if (dir == null || !dir.exists() || !dir.isDirectory) {
                 mainHandler.post { result.success(emptyList<Map<String, Any?>>()) }
                 return@execute
             }
-            val apkList = mutableListOf<Map<String, Any?>>()
             val iconCacheDir = getIconCacheDir()
-            dir.listFiles()?.filter { it.isFile && it.name.endsWith(".apk", true) }?.forEach {
-                val info = parseApkInfo(it, iconCacheDir).toMutableMap().apply { put("lastModified", it.lastModified()) }
-                apkList.add(info)
-            }
+            val apkList = dir.listFiles()
+                ?.filter { it.isFile && it.name.length > 4 && it.name.endsWith(".apk", ignoreCase = true) }
+                ?.sortedBy { it.name.lowercase() }
+                ?.mapNotNull { file ->
+                    try {
+                        parseApkInfo(file, iconCacheDir)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                ?: emptyList()
             mainHandler.post { result.success(apkList) }
         }
     }
 
     private fun detectDuplicates(filePaths: List<String>?, result: Result) {
-        executor.execute {
-            val pm = activity?.packageManager ?: flutterPluginBinding?.applicationContext?.packageManager
+        ioExecutor.execute {
+            val pm = packageManager()
                 ?: run { mainHandler.post { result.error("NO_CONTEXT", "Context not available", null) }; return@execute }
             val groups = mutableMapOf<String, MutableList<String>>()
 
@@ -771,11 +1254,10 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 var versionCode = 0L
 
                 try {
-                    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_META_DATA else PackageManager.GET_SIGNATURES
                     val info = runCatching {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                            pm.getPackageArchiveInfo(path, PackageManager.PackageInfoFlags.of(flags.toLong()))
-                        else @Suppress("DEPRECATION") pm.getPackageArchiveInfo(path, flags)
+                            pm.getPackageArchiveInfo(path, PackageManager.PackageInfoFlags.of(0L))
+                        else @Suppress("DEPRECATION") pm.getPackageArchiveInfo(path, 0)
                     }.getOrNull()
 
                     if (info != null) {
@@ -786,7 +1268,7 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                             appName = ai.loadLabel(pm).toString()
                         } ?: run { appName = file.nameWithoutExtension }
                         versionName = info.versionName ?: "Unknown"
-                        versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+                        versionCode = versionCodeOf(info)
                     } else {
                         appName = file.nameWithoutExtension
                         versionName = "Unknown"
@@ -805,39 +1287,68 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         }
     }
 
+    private fun buildInstalledAppMap(pkg: PackageInfo, pm: PackageManager, iconCacheDir: File): Map<String, Any?>? {
+        val app = pkg.applicationInfo ?: return null
+        val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+            (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+        val packageName = pkg.packageName ?: return null
+        val appName = try {
+            app.loadLabel(pm).toString()
+        } catch (_: Exception) {
+            packageName
+        }
+        val sourceDir = app.sourceDir ?: ""
+        val icon = try {
+            loadIconFile(app, pm, iconCacheDir, packageName, pkg.lastUpdateTime)
+        } catch (_: Exception) {
+            null
+        }
+        return mapOf(
+            "appName" to appName,
+            "packageName" to packageName,
+            "versionName" to (pkg.versionName ?: "Unknown"),
+            "versionCode" to versionCodeOf(pkg),
+            "iconPath" to icon?.absolutePath,
+            "sourceDir" to sourceDir,
+            "size" to if (sourceDir.isNotEmpty()) File(sourceDir).length() else 0L,
+            "isSystemApp" to isSystem,
+        )
+    }
+
     private fun getInstalledApps(includeSystem: Boolean, result: Result) {
-        executor.execute {
-            val ctx = activity ?: flutterPluginBinding?.applicationContext
+        ioExecutor.execute {
+            val ctx = getContext()
                 ?: run { mainHandler.post { result.error("NO_CONTEXT", "Context not available", null) }; return@execute }
             val pm = ctx.packageManager
                 ?: run { mainHandler.post { result.error("NO_CONTEXT", "PackageManager not available", null) }; return@execute }
 
-            val packages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0))
-            else @Suppress("DEPRECATION") pm.getInstalledPackages(0)
+            try {
+                val packages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0))
+                } else {
+                    @Suppress("DEPRECATION") pm.getInstalledPackages(0)
+                }
 
-            val iconCacheDir = getIconCacheDir()
-            val apps = packages.mapNotNull { pkg ->
-                val app = pkg.applicationInfo ?: return@mapNotNull null
-                val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0 || (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                if (includeSystem != isSystem) return@mapNotNull null
-                // Always exclude this app itself (its own APK source could be
-                // shown/backed up otherwise).
-                if (pkg.packageName == ctx.packageName) return@mapNotNull null
+                val selfPackage = ctx.packageName
+                val iconCacheDir = getIconCacheDir()
 
-                mapOf(
-                    "appName" to app.loadLabel(pm).toString(),
-                    "packageName" to pkg.packageName,
-                    "versionName" to (pkg.versionName ?: "Unknown"),
-                    "versionCode" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pkg.longVersionCode else @Suppress("DEPRECATION") pkg.versionCode.toLong(),
-                    "iconPath" to runCatching { saveIconToFile(app.loadIcon(pm), iconCacheDir, pkg.packageName)?.absolutePath }.getOrNull(),
-                    "sourceDir" to (app.sourceDir ?: ""),
-                    "size" to (app.sourceDir?.let { File(it).length() } ?: 0L),
-                    "isSystemApp" to isSystem
-                )
-            }.sortedBy { (it["appName"] as? String)?.lowercase() ?: "" }
+                // Filter before doing any expensive work (labels/icons).
+                val selected = packages.filter { pkg ->
+                    val app = pkg.applicationInfo ?: return@filter false
+                    val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                        (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                    includeSystem == isSystem && pkg.packageName != selfPackage
+                }
 
-            mainHandler.post { result.success(apps) }
+                // Labels + icons in parallel: this is what made the list slow to
+                // appear on devices with many apps.
+                val apps = mapParallel(selected) { pkg -> buildInstalledAppMap(pkg, pm, iconCacheDir) }
+                    .sortedBy { (it["appName"] as? String)?.lowercase() ?: "" }
+
+                mainHandler.post { result.success(apps) }
+            } catch (e: Exception) {
+                mainHandler.post { result.error("APPS_ERROR", "Failed to load installed apps: ${e.message}", null) }
+            }
         }
     }
 
@@ -847,18 +1358,20 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         if (pkg == act.packageName) return result.error("SELF_UNINSTALL_BLOCKED", "Cannot uninstall self", null)
 
         try {
-            Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply { setData(Uri.parse("package:$pkg")) }.takeIf { it.resolveActivity(act.packageManager) != null }?.let {
-                act.startActivity(it)
-                result.success(mapOf("status" to "uninstall_requested", "packageName" to pkg))
-            } ?: result.error("UNINSTALL_ERROR", "No handler for uninstall", null)
+            Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply { setData(Uri.parse("package:$pkg")) }
+                .takeIf { it.resolveActivity(act.packageManager) != null }
+                ?.let {
+                    act.startActivity(it)
+                    result.success(mapOf("status" to "uninstall_requested", "packageName" to pkg))
+                } ?: result.error("UNINSTALL_ERROR", "No handler for uninstall", null)
         } catch (e: Exception) {
             result.error("UNINSTALL_ERROR", "Failed to uninstall: ${e.message}", null)
         }
     }
 
     private fun backupInstalledApp(packageName: String?, destDir: String?, result: Result) {
-        executor.execute {
-            val ctx = activity ?: flutterPluginBinding?.applicationContext
+        ioExecutor.execute {
+            val ctx = getContext()
                 ?: run { mainHandler.post { result.error("NO_CONTEXT", "Context not available", null) }; return@execute }
             val pm = ctx.packageManager
                 ?: run { mainHandler.post { result.error("NO_CONTEXT", "PackageManager not available", null) }; return@execute }
@@ -868,9 +1381,11 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 ?: run { mainHandler.post { result.error("INVALID_ARGUMENT", "destDir is required", null) }; return@execute }
 
             try {
-                val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0))
-                else @Suppress("DEPRECATION") pm.getPackageInfo(pkg, 0)
+                } else {
+                    @Suppress("DEPRECATION") pm.getPackageInfo(pkg, 0)
+                }
 
                 val ai = pkgInfo.applicationInfo
                     ?: run { mainHandler.post { result.error("SOURCE_NOT_FOUND", "App info not found", null) }; return@execute }
@@ -884,10 +1399,17 @@ class ApkManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     mainHandler.post { result.error("DIR_CREATE_FAILED", "Failed to create dest", null) }
                     return@execute
                 }
-                val label = ai.loadLabel(pm).toString()
+                val label = try {
+                    ai.loadLabel(pm).toString()
+                } catch (_: Exception) {
+                    pkg
+                }
                 val version = pkgInfo.versionName ?: "unknown"
                 val destFile = uniqueFile(destDirFile, sanitizeFileName("${label}_${version}.apk"))
-                source.copyTo(destFile, false)
+                if (!copyFile(source, destFile)) {
+                    mainHandler.post { result.error("BACKUP_ERROR", "Failed to copy APK (insufficient space?)", null) }
+                    return@execute
+                }
 
                 mainHandler.post { result.success(mapOf("success" to true, "packageName" to pkg, "destPath" to destFile.absolutePath, "fileName" to destFile.name)) }
             } catch (e: Exception) {

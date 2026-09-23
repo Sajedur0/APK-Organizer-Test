@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_theme.dart';
 import '../models/directory_entry.dart';
 import '../services/apk_manager_service.dart';
 import '../widgets/hexagon_dots_loading.dart';
@@ -59,6 +60,15 @@ class _DirectoryBrowserSheetState extends State<DirectoryBrowserSheet> {
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open directory: $e'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
     }
   }
 
@@ -80,6 +90,7 @@ class _DirectoryBrowserSheetState extends State<DirectoryBrowserSheet> {
     final String? folderName = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: AppRadius.dialogBorder),
         title: const Text('Create New Folder'),
         content: TextField(
           controller: controller,
@@ -142,6 +153,15 @@ class _DirectoryBrowserSheetState extends State<DirectoryBrowserSheet> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to create folder: ${e.message}'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to create folder: $e'),
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
@@ -221,6 +241,7 @@ class _DirectoryBrowserSheetState extends State<DirectoryBrowserSheet> {
                 : ListView.builder(
                     controller: scrollController,
                     padding: const EdgeInsets.symmetric(vertical: 8),
+                    addAutomaticKeepAlives: false,
                     itemCount: _subdirectories.length + (isRoot ? 0 : 1),
                     itemBuilder: (context, index) {
                       if (!isRoot && index == 0) {

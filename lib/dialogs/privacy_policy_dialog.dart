@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class PrivacyPolicyPage extends StatelessWidget {
@@ -34,7 +36,7 @@ class PrivacyPolicyPage extends StatelessWidget {
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                 ),
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: AppRadius.dialogBorder,
               ),
               child: Row(
                 children: [

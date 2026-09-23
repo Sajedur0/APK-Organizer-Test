@@ -1,5 +1,13 @@
+import '../utils/format_util.dart';
+
+/// A permission requested by an APK, as declared in its manifest.
 class ApkPermission {
+  /// Full permission string, e.g. `android.permission.INTERNET`.
   final String name;
+
+  /// Whether the flag was set in the archive manifest. Note that for an APK
+  /// file (not yet installed) this only reflects the manifest flags, not a
+  /// runtime grant.
   final bool granted;
 
   const ApkPermission({required this.name, required this.granted});
@@ -11,13 +19,45 @@ class ApkPermission {
     );
   }
 
-  String get shortName => name.startsWith('android.permission.')
-      ? name.substring(20)
-      : name.startsWith('com.')
-          ? name.split('.').last
-          : name;
+  static const String androidPrefix = 'android.permission.';
+
+  /// Short, readable name: `INTERNET` instead of `android.permission.INTERNET`.
+  late final String shortName = () {
+    if (name.startsWith(androidPrefix)) {
+      return name.substring(androidPrefix.length);
+    }
+    if (name.startsWith('com.') || name.startsWith('android.')) {
+      final parts = name.split('.');
+      return parts.isEmpty ? name : parts.last;
+    }
+    return name;
+  }();
+
+  /// Best-effort grouping used for the "risky" hint in the detail page.
+  late final bool isSensitive = name.startsWith(androidPrefix) &&
+      const <String>{
+        'SEND_SMS',
+        'RECEIVE_SMS',
+        'READ_SMS',
+        'CALL_PHONE',
+        'READ_CONTACTS',
+        'WRITE_CONTACTS',
+        'RECORD_AUDIO',
+        'CAMERA',
+        'ACCESS_FINE_LOCATION',
+        'ACCESS_BACKGROUND_LOCATION',
+        'READ_CALL_LOG',
+        'WRITE_CALL_LOG',
+        'READ_PHONE_STATE',
+        'SYSTEM_ALERT_WINDOW',
+        'REQUEST_INSTALL_PACKAGES',
+      }.contains(shortName);
+
+  @override
+  String toString() => name;
 }
 
+/// Full details of a single APK file (parsed natively).
 class ApkDetailInfo {
   final String packageName;
   final String versionName;
@@ -33,7 +73,7 @@ class ApkDetailInfo {
   final String filePath;
   final List<ApkPermission> permissions;
 
-  const ApkDetailInfo({
+  ApkDetailInfo({
     required this.packageName,
     required this.versionName,
     required this.versionCode,
@@ -50,14 +90,27 @@ class ApkDetailInfo {
   });
 
   factory ApkDetailInfo.fromMap(Map<String, dynamic> map) {
-    final perms = (map['permissions'] as List<dynamic>?)
-            ?.map((e) => ApkPermission.fromMap(Map<String, dynamic>.from(e)))
-            .toList() ??
-        [];
-    final abis = (map['supportedAbis'] as List<dynamic>?)
-            ?.map((e) => e.toString())
-            .toList() ??
-        [];
+    final rawPermissions = map['permissions'];
+    final List<ApkPermission> permissions = <ApkPermission>[];
+    if (rawPermissions is List) {
+      for (final entry in rawPermissions) {
+        if (entry is Map) {
+          permissions.add(
+            ApkPermission.fromMap(Map<String, dynamic>.from(entry)),
+          );
+        }
+      }
+    }
+
+    final rawAbis = map['supportedAbis'];
+    final List<String> abis = <String>[];
+    if (rawAbis is List) {
+      for (final entry in rawAbis) {
+        final value = entry?.toString() ?? '';
+        if (value.isNotEmpty) abis.add(value);
+      }
+    }
+
     return ApkDetailInfo(
       packageName: map['packageName'] as String? ?? '',
       versionName: map['versionName'] as String? ?? 'Unknown',
@@ -71,30 +124,27 @@ class ApkDetailInfo {
       fileSize: (map['fileSize'] as num?)?.toInt() ?? 0,
       fileName: map['fileName'] as String? ?? '',
       filePath: map['filePath'] as String? ?? '',
-      permissions: perms,
+      permissions: List<ApkPermission>.unmodifiable(permissions),
     );
   }
 
-  String get formattedSize {
-    final size = fileSize;
-    if (size < 1024) return '$size B';
-    if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
-    if (size < 1024 * 1024 * 1024) {
-      return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    return '${(size / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-  }
+  late final String formattedSize = FormatUtil.formatBytes(fileSize);
 
-  String get signatureDisplay {
-    if (signatureHash == null) return 'Unknown';
-    final s = signatureHash!;
-    if (s.length <= 16) return s;
-    return '${s.substring(0, 8)}...${s.substring(s.length - 8)}';
-  }
+  late final String signatureDisplay = () {
+    final hash = signatureHash;
+    if (hash == null || hash.isEmpty) return 'Unknown';
+    if (hash.length <= 16) return hash;
+    return '${hash.substring(0, 8)}...${hash.substring(hash.length - 8)}';
+  }();
 
-  String get sdkDisplay =>
-      'API $minSdkVersion → API $targetSdkVersion';
+  String get sdkDisplay => 'API $minSdkVersion → API $targetSdkVersion';
 
   String get abisDisplay =>
       supportedAbis.isEmpty ? 'Unknown' : supportedAbis.join(', ');
+
+  /// Permissions that are usually worth a second look, shown first.
+  late final List<ApkPermission> sensitivePermissions =
+      permissions.where((permission) => permission.isSensitive).toList();
+
+  late final int sensitivePermissionCount = sensitivePermissions.length;
 }

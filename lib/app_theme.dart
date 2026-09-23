@@ -1,6 +1,38 @@
 import 'package:flutter/material.dart';
 
+/// Single source of truth for corner radii.
+///
+/// Widgets used to hardcode 12/14/16/20/28 while the theme used 8, which made
+/// ripples spill outside card corners and gave sheets/dialogs inconsistent
+/// shapes. Everything rounded now comes from here.
+class AppRadius {
+  const AppRadius._();
+
+  /// Cards and list tiles.
+  static const double card = 14;
+
+  /// Buttons, text fields, popups, menus.
+  static const double control = 12;
+
+  /// Dialogs.
+  static const double dialog = 20;
+
+  /// Modal bottom sheets.
+  static const double sheet = 28;
+
+  /// Small badges / chips.
+  static const double chip = 8;
+
+  static BorderRadius get cardBorder => BorderRadius.circular(card);
+  static BorderRadius get controlBorder => BorderRadius.circular(control);
+  static BorderRadius get dialogBorder => BorderRadius.circular(dialog);
+  static BorderRadius get sheetBorder =>
+      const BorderRadius.vertical(top: Radius.circular(sheet));
+}
+
 class AppTheme {
+  const AppTheme._();
+
   static const _lightScheme = ColorScheme(
     brightness: Brightness.light,
     primary: Color(0xFF006C5B),
@@ -71,8 +103,10 @@ class AppTheme {
     inversePrimary: Color(0xFF006C5B),
   );
 
-  static ThemeData get light => _theme(_lightScheme);
-  static ThemeData get dark => _theme(_darkScheme);
+  /// Themes are built once and cached: [ThemeData] construction is not free and
+  /// the app asks for these on every rebuild of the root widget.
+  static final ThemeData light = _theme(_lightScheme);
+  static final ThemeData dark = _theme(_darkScheme);
 
   static ThemeData _theme(ColorScheme scheme) {
     final isDark = scheme.brightness == Brightness.dark;
@@ -98,7 +132,7 @@ class AppTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppRadius.cardBorder,
           side: BorderSide(color: scheme.outlineVariant.withAlpha(120)),
         ),
       ),
@@ -106,51 +140,75 @@ class AppTheme {
         backgroundColor: scheme.surface,
         surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.horizontal(right: Radius.circular(8)),
+          borderRadius: BorderRadius.horizontal(
+            right: Radius.circular(AppRadius.dialog),
+          ),
         ),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: scheme.surfaceContainerLow,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: AppRadius.dialogBorder),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: scheme.surfaceContainerLow,
         surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.sheet),
+          ),
         ),
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: scheme.surfaceContainerHigh,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: AppRadius.controlBorder),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: scheme.surfaceContainerLow,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppRadius.controlBorder,
           borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppRadius.controlBorder,
           borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppRadius.controlBorder,
           borderSide: BorderSide(color: scheme.primary, width: 1.6),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.controlBorder),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.controlBorder),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.controlBorder),
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.controlBorder),
+        ),
+      ),
+      listTileTheme: const ListTileThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(AppRadius.control)),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.chip),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
@@ -162,7 +220,7 @@ class AppTheme {
           color: isDark ? scheme.onSurface : scheme.onInverseSurface,
           fontWeight: FontWeight.w600,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: AppRadius.controlBorder),
       ),
       dividerTheme: DividerThemeData(
         color: scheme.outlineVariant.withAlpha(isDark ? 120 : 160),

@@ -8,10 +8,10 @@ class PermissionUtils {
   /// Checks if the app has storage permission.
   static Future<bool> hasStoragePermission() async {
     try {
-      final bool result =
-          await ApkManagerService.checkStoragePermission();
-      return result;
+      return await ApkManagerService.checkStoragePermission();
     } on PlatformException catch (_) {
+      return false;
+    } on ApkManagerException catch (_) {
       return false;
     }
   }
@@ -19,11 +19,17 @@ class PermissionUtils {
   /// Requests storage permission with rationale.
   static Future<bool> requestStoragePermissionWithRationale() async {
     try {
-      final Map<dynamic, dynamic> result =
+      final Map<String, dynamic> result =
           await ApkManagerService.requestStoragePermission();
+      final status = result['status'] as String?;
       final bool granted = (result['granted'] as bool?) ?? false;
+      // A redirected request means the user still has to flip the switch in
+      // Settings — treat it as "not granted yet" so callers stop and explain.
+      if (!granted && status == 'redirected_to_settings') return false;
       return granted;
     } on PlatformException catch (_) {
+      return false;
+    } on ApkManagerException catch (_) {
       return false;
     }
   }
@@ -33,6 +39,8 @@ class PermissionUtils {
     try {
       return await ApkManagerService.canInstallPackages();
     } on PlatformException catch (_) {
+      return false;
+    } on ApkManagerException catch (_) {
       return false;
     }
   }
@@ -45,6 +53,8 @@ class PermissionUtils {
           await ApkManagerService.requestInstallPermission();
       return (result['granted'] as bool?) ?? false;
     } on PlatformException catch (_) {
+      return false;
+    } on ApkManagerException catch (_) {
       return false;
     }
   }
