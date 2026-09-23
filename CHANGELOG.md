@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.9]
+- Much faster scans: directories are walked in one pass, APKs are parsed on a
+  bounded worker pool, and progress is delivered in throttled batches instead of
+  one event per file
+- Smooth list rendering: cached sort/search keys, O(1) lookups for selection,
+  rename, move and delete, fixed-extent lists and downscaled icon decoding
+- A scan can now be stopped from the list or the floating action button and
+  keeps everything found so far
+- Live scan progress (files found + current folder) is shown while scanning
+- Smart Organize is idempotent: correctly named files (including `_1` conflict
+  names) are skipped, and the summary reports them separately
+- Batch backup of installed apps runs in parallel with visible progress instead
+  of freezing the screen
+- More accurate logic: delete/move/rename report real failures instead of
+  silently dropping list entries, permission checks run immediately after the
+  Settings round-trip, and duplicate detection never groups unrelated APKs
+- Icons are cached and decoded at display size, so lists scroll without the
+  PNG decode stutter
+- Unified corner radii across cards, dialogs, sheets and menus
+
 ## [1.0.8]
 - Improved in-app updates with a dismissible download at first, and a blocking update if postponed
 - Updates now resume correctly after restart and are more reliable in the background

@@ -3,9 +3,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../app_theme.dart';
 import '../models/installed_app.dart';
 import '../screens/installed_app_detail_page.dart';
 import '../services/apk_manager_service.dart';
+import '../utils/parallel_work_queue.dart';
 import '../widgets/compact_action_chip.dart';
 import '../widgets/directory_browser_sheet.dart';
 import '../widgets/hexagon_dots_loading.dart';
@@ -28,9 +30,14 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
     with WidgetsBindingObserver {
   List<InstalledApp> _apps = [];
   List<InstalledApp> _filteredApps = [];
+
+  /// package name -> app, so lookups never scan the whole list.
+  final Map<String, InstalledApp> _appIndex = {};
+
   final Set<String> _selectedPackages = {};
   final Set<String> _pendingUninstallPackages = {};
   bool _isLoading = true;
+  String _backupProgress = '';
   String? _errorMessage;
   String _searchQuery = '';
   bool _isSearching = false;
@@ -72,13 +79,12 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
 
     if (_selectedPackages.isNotEmpty) {
       bool hasChanges = false;
-      final Set<String> stillSelected = {};
+      final Set<String> stillSelected = <String>{};
       for (final pkg in _selectedPackages) {
-        final exists = _apps.any((app) => app.packageName == pkg);
-        if (!exists) {
-          hasChanges = true;
-        } else {
+        if (_appIndex.containsKey(pkg)) {
           stillSelected.add(pkg);
+        } else {
+          hasChanges = true;
         }
       }
       if (hasChanges && mounted) {
@@ -105,6 +111,9 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
       if (!mounted) return;
       setState(() {
         _apps = apps;
+        _appIndex
+          ..clear()
+          ..addEntries(apps.map((app) => MapEntry(app.packageName, app)));
         _applyFilter();
         _isLoading = false;
       });
@@ -118,19 +127,24 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
   }
 
   void _applyFilter() {
-    final validPkgs = _apps.map((a) => a.packageName).toSet();
-    _selectedPackages.removeWhere((p) => !validPkgs.contains(p));
-    if (_searchQuery.trim().isEmpty) {
-      _filteredApps = List.from(_apps);
-    } else {
-      final q = _searchQuery.trim().toLowerCase();
-      _filteredApps = _apps.where((a) => a.searchableText.contains(q)).toList();
+    if (_selectedPackages.isNotEmpty) {
+      _selectedPackages.removeWhere((pkg) => !_appIndex.containsKey(pkg));
     }
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) {
+      _filteredApps = List<InstalledApp>.of(_apps);
+      return;
+    }
+    final result = <InstalledApp>[];
+    for (final app in _apps) {
+      if (app.searchLower.contains(query)) result.add(app);
+    }
+    _filteredApps = result;
   }
 
   void _onSearchChanged(String value) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+    _searchDebounce = Timer(const Duration(milliseconds: 220), () {
       if (mounted) {
         setState(() {
           _searchQuery = value;
@@ -164,7 +178,9 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
 
   void _selectAll() {
     setState(() {
-      if (_selectedPackages.length == _filteredApps.length) {
+      final allSelected = _filteredApps.isNotEmpty &&
+          _selectedPackages.length == _filteredApps.length;
+      if (allSelected) {
         _selectedPackages.clear();
       } else {
         _selectedPackages
@@ -176,12 +192,7 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
 
   void _clearSelection() => setState(() { _selectedPackages.clear(); });
 
-  InstalledApp? _appByPackage(String pkg) {
-    for (final app in _apps) {
-      if (app.packageName == pkg) return app;
-    }
-    return null;
-  }
+  InstalledApp? _appByPackage(String pkg) => _appIndex[pkg];
 
   Future<String?> _pickBackupDirectory() async {
     final roots = await ApkManagerService.getDirectories();
@@ -190,7 +201,9 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.sheet),
+        ),
       ),
       builder: (ctx) => DirectoryBrowserSheet(initialDirectories: roots),
     );
@@ -216,21 +229,41 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
     try {
       final dir = await _pickBackupDirectory();
       if (dir == null) return;
-      int ok = 0, fail = 0;
-      setState(() => _isLoading = true);
-      for (final pkg in List<String>.from(_selectedPackages)) {
-        final app = _appByPackage(pkg);
-        if (app == null) continue;
-        try {
-          await ApkManagerService.backupInstalledApp(app.packageName, dir);
-          ok++;
-        } on ApkManagerException catch (_) {
-          fail++;
-        }
-      }
+      final packages = List<String>.from(_selectedPackages);
+      final failures = List<bool>.filled(packages.length, false);
+      var done = 0;
+      setState(() {
+        _isLoading = true;
+        _backupProgress = 'Backing up 0/${packages.length}…';
+      });
+      await runParallel(
+        total: packages.length,
+        concurrency: 2,
+        task: (index) async {
+          final app = _appByPackage(packages[index]);
+          if (app != null) {
+            try {
+              await ApkManagerService.backupInstalledApp(app.packageName, dir);
+            } on ApkManagerException {
+              failures[index] = true;
+            } catch (_) {
+              failures[index] = true;
+            }
+          } else {
+            failures[index] = true;
+          }
+          done++;
+          if (mounted) {
+            setState(() => _backupProgress = 'Backing up $done/${packages.length}…');
+          }
+        },
+      );
+      final ok = failures.where((failed) => !failed).length;
+      final fail = failures.length - ok;
       if (!mounted) return;
       setState(() {
         _isLoading = false;
+        _backupProgress = '';
         _selectedPackages.clear();
       });
       _showSnackBar(
@@ -238,15 +271,29 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
         isError: fail > 0 && ok == 0,
       );
     } on ApkManagerException catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _backupProgress = '';
+        });
+      }
       _showSnackBar(e.message, isError: true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _backupProgress = '';
+        });
+      }
+      _showSnackBar('Backup failed: $e', isError: true);
     }
   }
 
   void _onPackageRemoved(String packageName) {
     if (!mounted) return;
+    final removed = _appIndex.remove(packageName);
     setState(() {
-      _apps.removeWhere((app) => app.packageName == packageName);
+      if (removed != null) _apps.remove(removed);
       _selectedPackages.remove(packageName);
       _pendingUninstallPackages.remove(packageName);
       _applyFilter();
@@ -274,21 +321,27 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
     );
     if (!confirmed) return;
 
-    final int count = _selectedPackages.length;
+    var requested = 0;
+    var failed = 0;
     for (final pkg in List<String>.from(_selectedPackages)) {
       final app = _appByPackage(pkg);
       if (app == null) continue;
       try {
         _pendingUninstallPackages.add(app.packageName);
         await ApkManagerService.uninstallPackage(app.packageName);
+        requested++;
       } catch (_) {
         _pendingUninstallPackages.remove(app.packageName);
-        // Ignore errors for batch
+        failed++;
       }
     }
+    if (!mounted) return;
     setState(() => _selectedPackages.clear());
     _showSnackBar(
-      'Uninstall requests sent for $count app(s). Please confirm in system dialogs.',
+      'Uninstall requested for $requested app(s)'
+      '${failed > 0 ? ', $failed failed' : ''}. '
+      'Please confirm in the system dialogs.',
+      isError: failed > 0 && requested == 0,
     );
   }
 
@@ -398,7 +451,7 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
                     fillColor: colorScheme.surfaceContainerHighest
                         .withAlpha(120),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
+                      borderRadius: BorderRadius.circular(999),
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
@@ -537,7 +590,12 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
                 color: colorScheme.onSurfaceVariant,
               ),
               const SizedBox(width: 8),
-              Text('${_filteredApps.length} app(s)'),
+              Text(
+                _backupProgress.isNotEmpty
+                    ? _backupProgress
+                    : '${_filteredApps.length} app(s)',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
               const Spacer(),
               if (_isLoading)
                 const SizedBox(
@@ -549,28 +607,44 @@ class _InstalledAppsPageState extends State<InstalledAppsPage>
           ),
         ),
         Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.only(bottom: 88),
-            itemCount: _filteredApps.length,
-            itemBuilder: (context, index) {
-              final app = _filteredApps[index];
-              final selected = _selectedPackages.contains(app.packageName);
-              return _InstalledAppTile(
-                key: ValueKey(app.packageName),
-                app: app,
-                isSelected: selected,
-                onTap: () {
-                  if (_selectedPackages.isNotEmpty) {
-                    _toggleSelection(app);
-                  } else {
-                    _openAppDetails(app);
-                  }
-                },
-                onLongPress: () => _toggleSelection(app),
-                onBackup: () => _backupApp(app),
-                onUninstall: () => _uninstallApp(app),
-              );
-            },
+          child: RefreshIndicator(
+            onRefresh: _loadApps,
+            child: ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(bottom: 88),
+              // All tiles share one intrinsic height — let the sliver measure a
+              // single prototype instead of every item.
+              prototypeItem: _InstalledAppTile(
+                app: _filteredApps.first,
+                isSelected: false,
+                onTap: () {},
+                onLongPress: () {},
+                onBackup: () {},
+                onUninstall: () {},
+              ),
+              addAutomaticKeepAlives: false,
+              cacheExtent: 600,
+              itemCount: _filteredApps.length,
+              itemBuilder: (context, index) {
+                final app = _filteredApps[index];
+                final selected = _selectedPackages.contains(app.packageName);
+                return _InstalledAppTile(
+                  key: ValueKey(app.packageName),
+                  app: app,
+                  isSelected: selected,
+                  onTap: () {
+                    if (_selectedPackages.isNotEmpty) {
+                      _toggleSelection(app);
+                    } else {
+                      _openAppDetails(app);
+                    }
+                  },
+                  onLongPress: () => _toggleSelection(app),
+                  onBackup: () => _backupApp(app),
+                  onUninstall: () => _uninstallApp(app),
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -603,7 +677,7 @@ class _InstalledAppTile extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       color: isSelected ? colorScheme.primaryContainer.withAlpha(110) : null,
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: AppRadius.cardBorder,
         onTap: onTap,
         onLongPress: onLongPress,
         child: Padding(
@@ -618,14 +692,20 @@ class _InstalledAppTile extends StatelessWidget {
                     height: 50,
                     decoration: BoxDecoration(
                       color: colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: AppRadius.cardBorder,
                     ),
                     child: app.iconPath != null && app.iconPath!.isNotEmpty
                         ? ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: AppRadius.cardBorder,
                             child: Image.file(
                               File(app.iconPath!),
+                              width: 50,
+                              height: 50,
                               fit: BoxFit.cover,
+                              cacheWidth: 150,
+                              cacheHeight: 150,
+                              filterQuality: FilterQuality.medium,
+                              gaplessPlayback: true,
                               errorBuilder: (_, error, stackTrace) =>
                                   Icon(Icons.apps, color: colorScheme.primary),
                             ),

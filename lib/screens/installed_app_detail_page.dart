@@ -22,27 +22,35 @@ class InstalledAppDetailPage extends StatefulWidget {
 }
 
 class _InstalledAppDetailPageState extends State<InstalledAppDetailPage> {
-  late final String _installedDate;
+  String _installedDate = '…';
 
   @override
   void initState() {
     super.initState();
-    _installedDate = _resolveInstalledDate();
+    // The stat call is async: the page paints immediately and fills the date
+    // in as soon as the filesystem answers.
+    _resolveInstalledDate();
   }
 
-  String _resolveInstalledDate() {
+  Future<void> _resolveInstalledDate() async {
+    String label = 'Unknown';
     try {
-      final file = File(widget.app.sourceDir);
-      if (file.existsSync()) {
-        final date = file.lastModifiedSync();
-        final months = [
-          'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-        ];
-        return '${months[date.month - 1]} ${date.day}, ${date.year}';
-      }
-    } catch (_) {}
-    return 'Unknown';
+      final stat = await File(widget.app.sourceDir).stat();
+      final date = stat.modified;
+      if (date.year > 1970) label = _formatDate(date);
+    } catch (_) {
+      // Keep 'Unknown' — the source directory may be unreadable.
+    }
+    if (!mounted) return;
+    setState(() => _installedDate = label);
+  }
+
+  static String _formatDate(DateTime date) {
+    const months = <String>[
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
   }
 
   @override
@@ -133,7 +141,13 @@ class _InstalledAppDetailPageState extends State<InstalledAppDetailPage> {
                       borderRadius: BorderRadius.circular(18),
                       child: Image.file(
                         File(app.iconPath!),
+                        width: 64,
+                        height: 64,
                         fit: BoxFit.cover,
+                        cacheWidth: 192,
+                        cacheHeight: 192,
+                        filterQuality: FilterQuality.medium,
+                        gaplessPlayback: true,
                         errorBuilder: (_, _, _) => Icon(
                           Icons.android,
                           color: colorScheme.primary,

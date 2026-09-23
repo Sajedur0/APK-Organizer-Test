@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../app_theme.dart';
+
 class DetailRow extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -21,7 +23,7 @@ class DetailRow extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest.withAlpha(100),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppRadius.cardBorder,
       ),
       child: Row(
         children: [

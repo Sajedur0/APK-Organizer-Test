@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/apk_manager_service.dart';
@@ -37,7 +39,7 @@ class _AboutDialogState extends State<AboutDialog> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      shape: RoundedRectangleBorder(borderRadius: AppRadius.dialogBorder),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 360),
         padding: const EdgeInsets.all(0),
@@ -58,7 +60,7 @@ class _AboutDialogState extends State<AboutDialog> {
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(28),
+                  top: Radius.circular(AppRadius.dialog),
                 ),
               ),
               child: Column(
@@ -68,7 +70,7 @@ class _AboutDialogState extends State<AboutDialog> {
                     width: 80,
                     height: 80,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: AppRadius.controlBorder,
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withAlpha(80),
@@ -79,7 +81,7 @@ class _AboutDialogState extends State<AboutDialog> {
                       ],
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: AppRadius.controlBorder,
                       child: Image.asset(
                         'assets/icon/app_icon.png',
                         fit: BoxFit.cover,
@@ -109,7 +111,7 @@ class _AboutDialogState extends State<AboutDialog> {
                     ),
                     decoration: BoxDecoration(
                       color: Colors.white.withAlpha(40),
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: AppRadius.controlBorder,
                     ),
 child: Text(
                        'v${widget.appVersion}',

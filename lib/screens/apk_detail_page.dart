@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../app_theme.dart';
 import '../models/apk_detail.dart';
 import '../services/apk_manager_service.dart';
 import '../widgets/hexagon_dots_loading.dart';
@@ -156,8 +157,18 @@ class _ApkDetailPageState extends State<ApkDetailPage> {
               child: detail.iconPath != null && detail.iconPath!.isNotEmpty
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(18),
-                      child: Image.file(File(detail.iconPath!), fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => Icon(Icons.android, color: colorScheme.primary, size: 36)),
+                      child: Image.file(
+                        File(detail.iconPath!),
+                        width: 64,
+                        height: 64,
+                        fit: BoxFit.cover,
+                        cacheWidth: 192,
+                        cacheHeight: 192,
+                        filterQuality: FilterQuality.medium,
+                        gaplessPlayback: true,
+                        errorBuilder: (_, _, _) => Icon(Icons.android,
+                            color: colorScheme.primary, size: 36),
+                      ),
                     )
                   : Icon(Icons.android, color: colorScheme.primary, size: 36),
             ),
@@ -234,6 +245,7 @@ class _ApkDetailPageState extends State<ApkDetailPage> {
     return Card(
       child: Column(
         children: perms.map((perm) => ListTile(
+          visualDensity: VisualDensity.compact,
           dense: true,
           leading: Icon(
             perm.granted ? Icons.check_circle : Icons.remove_circle_outline,

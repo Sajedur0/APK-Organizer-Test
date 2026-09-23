@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../app_theme.dart';
+
 class BottomSheetAction extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -20,13 +22,13 @@ class BottomSheetAction extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppRadius.cardBorder,
         child: Container(
           width: 100,
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
           decoration: BoxDecoration(
             border: Border.all(color: color.withAlpha(77)),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppRadius.cardBorder,
             color: color.withAlpha(20),
           ),
           child: Column(

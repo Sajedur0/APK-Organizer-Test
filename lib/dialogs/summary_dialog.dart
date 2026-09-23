@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../app_theme.dart';
+
 class SummaryDialog extends StatelessWidget {
   final String title;
   final Map<String, int> stats;
@@ -20,7 +22,7 @@ class SummaryDialog extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      shape: RoundedRectangleBorder(borderRadius: AppRadius.dialogBorder),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 400, maxHeight: 550),
         child: Column(
@@ -32,9 +34,7 @@ class SummaryDialog extends StatelessWidget {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: colorScheme.primaryContainer,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
+                borderRadius: AppRadius.sheetBorder,
               ),
               child: Row(
                 children: [
