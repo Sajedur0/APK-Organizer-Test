@@ -4,94 +4,41 @@
 *.pyc
 *.swp
 .DS_Store
-.atom/
 .buildlog/
-.history
-.svn/
+.history/
+.swiftpm/
 migrate_working_dir/
 
-# IntelliJ related
+# IntelliJ / Android Studio related
 *.iml
 *.ipr
 *.iws
 .idea/
+.idea/caches/
+.idea/modules.xml
+.idea/misc.xml
 
 # VS Code related
 .vscode/
 
-# Flutter/Dart/Pub related
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.packages
-.pub-cache/
-.pub/
-/build/
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# Android/Gradle related
+**/gradle-wrapper.jar
+.gradle/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
 
-# Pub lock
-# For an app (like APK Organizer) keep pubspec.lock committed for reproducible builds.
-# Uncomment below only for libraries/packages:
-# pubspec.lock
-# **/pubspec.lock
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android - build outputs (handled by /build/ but keep explicit for safety)
-# /android/app/debug, /android/app/profile, /android/app/release are ignored via root /build/ and android/.gitignore
-/android/app/debug
-/android/app/profile
-/android/app/release
-
-# Android - Gradle & local config (see android/.gitignore for gradle-wrapper.jar, .gradle, etc.)
-**/android/.gradle/
-**/android/captures/
-**/android/gradlew
-**/android/gradlew.bat
-**/android/local.properties
-**/android/**/GeneratedPluginRegistrant.java
-**/android/key.properties
-**/android/gradle/
-**/*.keystore
+# Keystores & signing
+key.properties
 *.jks
 *.keystore
 
-# iOS
-**/ios/Pods/
-**/ios/.symlinks/
-**/ios/Flutter/Flutter.framework
-**/ios/Flutter/Flutter.podspec
-**/ios/Flutter/Generated.xcconfig
-**/ios/Flutter/app.flx
-**/ios/Flutter/app.zip
-**/ios/Flutter/flutter_assets/
-**/ios/Flutter/flutter_export_environment.sh
-**/ios/ServiceDefinitions.json
-**/ios/Runner/GeneratedPluginRegistrant.*
-
-# macOS
-**/macos/Pods/
-**/macos/Flutter/GeneratedPluginRegistrant.swift
-
-# Linux
-**/linux/flutter/ephemeral/
-
-# Windows
-**/windows/flutter/ephemeral/
-
-# Web
-**/web/favicon.png
-**/web/icons/Icon-192.png
-**/web/icons/Icon-512.png
-**/web/icons/Icon-maskable-192.png
-**/web/icons/Icon-maskable-512.png
-**/web/manifest.json
-**/web/canvaskit/
+# Symbolication / obfuscation related
+app.*.symbols
+app.*.map.json
 
 # Coverage & tests
 coverage/
@@ -101,20 +48,3 @@ coverage/
 .env
 .env.*
 !.env.example
-
-# Generated code
-*.g.dart
-*.freezed.dart
-*.mocks.dart
-**/*.gen.dart
-lib/generated/**
-
-# Temporary prompt / AI files (local only)
-# flutter_in_app_update_prompt.md
-
-# Keystores & signing
-android/key.properties
-android/*.jks
-android/*.keystore
-android/app/*.jks
-android/app/*.keystore

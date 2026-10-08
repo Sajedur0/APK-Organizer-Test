@@ -1,14 +1,15 @@
 <div align="center">
 
-<img src="icon.png" alt="APK Organizer" width="140" />
+<img src="app/src/main/res/drawable-nodpi/app_icon.png" alt="APK Organizer" width="140" />
 
 # APK Organizer
 
 **Scan, organize, and manage all your APK files — effortlessly.**
 
-A lightweight yet powerful Android utility built with Flutter.
+A lightweight yet powerful Android utility built with **Kotlin + Jetpack Compose**.
 
-[![Flutter](https://img.shields.io/badge/Flutter-3.11%2B-02569B?logo=flutter&logoColor=white&style=for-the-badge)](https://flutter.dev)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.3-7F52FF?logo=kotlin&logoColor=white&style=for-the-badge)](https://kotlinlang.org)
+[![Compose](https://img.shields.io/badge/Jetpack-Compose-4285F4?logo=jetpackcompose&logoColor=white&style=for-the-badge)](https://developer.android.com/jetpack/compose)
 [![Android](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white&style=for-the-badge)](https://www.android.com)
 [![Version](https://img.shields.io/badge/Version-1.0.9-blue?style=for-the-badge)](https://github.com/Sajedur0/APK-Organizer/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
@@ -18,6 +19,10 @@ A lightweight yet powerful Android utility built with Flutter.
 </div>
 
 ---
+
+> **v1.0.9 — Kotlin rewrite.** The entire app (UI, state and logic) was ported
+> from Flutter/Dart to native Kotlin with Jetpack Compose, keeping the design,
+> behavior and performance characteristics of the Flutter version intact.
 
 ## Features
 
@@ -58,21 +63,21 @@ A lightweight yet powerful Android utility built with Flutter.
 - Persistent preference
 - Quick toggle from app bar
 
-### 🔄 In-App Updates
-- Google Play `in_app_update_android: ^1.1.5` integration
-- **Flexible** (<3 days staleness) — dismissible background download
-- **Immediate** (≥3 days or Play priority) — blocking full-screen flow
-- Auto `completeFlexibleUpdate()` on `downloaded` for seamless restart
-
 </td>
 </tr>
 </table>
 
+### 🔄 In-App Updates
+- Google Play **In-App Updates** (`com.google.android.play:app-update-ktx`)
+- **Flexible** (<3 days staleness) — dismissible background download
+- **Immediate** (≥3 days or Play priority) — blocking full-screen flow
+- Auto `completeUpdate()` on `DOWNLOADED` for seamless restart
+
 ### ⚡ Performance
 - Batched scan progress — the list updates a few times per second, not per file
-- Directories are walked once, APKs are parsed on a background worker pool
-- Cached icons decoded at display size; fixed-extent lists for stutter-free scroll
-- O(1) lookups for selection, rename, move and delete (no full-list rescans)
+- Directories are walked once, APKs are parsed on a bounded worker pool
+- Cached icons decoded at display size; O(1) lookups for selection, rename,
+  move and delete (no full-list rescans)
 - Stoppable scans that keep the files found so far
 
 ### Also Includes
@@ -101,12 +106,13 @@ A lightweight yet powerful Android utility built with Flutter.
 
 | Layer | Technology |
 |:---|:---|
-| **Framework** | Flutter (Dart) |
-| **Native Bridge** | MethodChannel / EventChannel (Kotlin) |
-| **State Management** | StatefulWidget + setState |
+| **Language** | Kotlin 2.3 |
+| **UI** | Jetpack Compose + Material 3 (Compose BOM) |
+| **Concurrency** | Kotlin Coroutines (bounded worker pools) |
 | **Storage** | SharedPreferences |
-| **Min SDK** | Android 7.0 (API 24) — required by `in_app_update_android` (needs ≥21) |
-| **Compile SDK** | 37 |
+| **Updates** | Google Play In-App Updates (`app-update-ktx`) |
+| **Min SDK** | Android 7.0 (API 24) |
+| **Target / Compile SDK** | 37 |
 
 ---
 
@@ -114,7 +120,8 @@ A lightweight yet powerful Android utility built with Flutter.
 
 ### Prerequisites
 
-- [Flutter SDK](https://flutter.dev/docs/get-started/install) `^3.12.0`
+- [Android Studio](https://developer.android.com/studio) (Ladybug or newer)
+- JDK 21
 - Android SDK with `compileSdk 37`
 
 ### Build from Source
@@ -124,14 +131,17 @@ A lightweight yet powerful Android utility built with Flutter.
 git clone https://github.com/Sajedur0/APK-Organizer.git
 cd APK-Organizer
 
-# Install dependencies
-flutter pub get
+# Generate the Gradle wrapper (one time; or just open the project in Android Studio)
+gradle wrapper --gradle-version 9.2
 
-# Build a release APK
-flutter build apk --release
+# Build a release APK (uses key.properties + your keystore when present)
+./gradlew assembleRelease
 ```
 
-The signed APK will be at `build/app/outputs/flutter-apk/app-release.apk`.
+The APK will be at `app/build/outputs/apk/release/app-release.apk`.
+
+> The Gradle wrapper jar is not committed. Opening the project in Android
+> Studio handles the Gradle/SDK setup automatically.
 
 ### Install from Play Store
 
@@ -144,30 +154,29 @@ The signed APK will be at `build/app/outputs/flutter-apk/app-release.apk`.
 ## Project Structure
 
 ```
-lib/
-├── main.dart                 # App entry point
-├── app_theme.dart            # Light / Dark theme definitions
-├── src/
-│   └── entry_point.dart      # ApkManagerApp widget
-├── models/                   # Data models
-├── screens/                  # UI screens
-│   ├── home_page.dart
-│   ├── apk_detail_page.dart
-│   ├── installed_apps_page.dart
-│   └── installed_app_detail_page.dart
-├── services/                 # Business logic & native bridge
-│   ├── apk_manager_service.dart
-│   ├── scanner_service.dart
-│   ├── file_operations.dart
-│   ├── duplicate_handler.dart
-│   ├── renamer_service.dart
-│   ├── preferences_service.dart
-│   ├── logger_service.dart
-│   ├── app_update_service.dart   # Play In-App Update (flexible → immediate, staleness-aware)
-│   └── update_service.dart       # Legacy shim → delegates to AppUpdateService
-├── widgets/                  # Reusable UI components
-├── dialogs/                  # Dialog widgets
-└── utils/                    # Utilities & helpers
+app/src/main/kotlin/com/apkorganizer/
+├── MainActivity.kt           # Single-activity host (launchers, receivers, update flow)
+├── App.kt                    # Root composable (theming + overlay navigation)
+├── data/                     # Data layer
+│   ├── ApkManager.kt         # The engine: scanning, install, rename, move, icons…
+│   ├── ApkFile.kt            # APK model (sort keys, rename rules, identity)
+│   ├── ApkDetailInfo.kt      # Parsed APK detail (permissions, ABIs, signature)
+│   ├── InstalledApp.kt       # Installed app model
+│   └── DirectoryEntry.kt     # Directory browser model
+├── services/                 # Business logic
+│   ├── ScannerService.kt     # Streaming scan with cancellation
+│   ├── RenamerService.kt     # Auto-rename (AppName_Version.apk)
+│   ├── DuplicateHandler.kt   # Duplicate analysis & removal (keep newest)
+│   ├── FileOperations.kt     # Batch move with conflict suffixes
+│   ├── PreferencesService.kt # Theme + sort persistence
+│   ├── AppUpdateService.kt   # Play In-App Update (flexible → immediate, staleness-aware)
+│   └── LoggerService.kt      # Ring-buffer logger
+├── ui/
+│   ├── theme/AppTheme.kt     # Exact M3 color schemes + AppRadius constants
+│   ├── screens/              # Home, APK detail, installed/system apps, privacy
+│   ├── dialogs/              # About, summary
+│   └── widgets/              # Tiles, chips, sheets, snackbars, loading, search
+└── utils/                    # FormatUtil, runParallel, VersionUtil
 ```
 
 ---
