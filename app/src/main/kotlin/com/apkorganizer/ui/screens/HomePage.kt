@@ -1,5 +1,10 @@
 package com.apkorganizer.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,17 +38,13 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SettingsApplications
 import androidx.compose.material.icons.filled.SortByAlpha
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.DriveFileMove
@@ -51,15 +52,14 @@ import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.PrivacyTip
+import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.StopCircle
-import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material3.Button
@@ -112,6 +112,7 @@ import com.apkorganizer.R
 import com.apkorganizer.data.ApkFile
 import com.apkorganizer.data.ApkManager
 import com.apkorganizer.data.ApkManagerException
+import com.apkorganizer.data.StorageInsights
 import com.apkorganizer.services.AppUpdateService
 import com.apkorganizer.services.DuplicateHandler
 import com.apkorganizer.services.FileOperations
@@ -139,6 +140,7 @@ import com.apkorganizer.ui.widgets.PermissionRationaleRequest
 import com.apkorganizer.ui.widgets.SearchField
 import com.apkorganizer.ui.widgets.SelectionBottomBar
 import com.apkorganizer.ui.widgets.SnackbarController
+import com.apkorganizer.ui.widgets.StorageInsightsCard
 import com.apkorganizer.ui.widgets.TextInputDialog
 import com.apkorganizer.ui.widgets.withAlpha
 import com.apkorganizer.utils.CancellationToken
@@ -179,7 +181,7 @@ class OrganizeProgressState(val token: CancellationToken) {
 /** Data for the summary dialog shown after "Smart Organize". */
 class SummaryData(
     val title: String,
-    val stats: List<Pair<String, Int>>,
+    val stats: List<Pair<String, String>>,
     val details: List<String>,
     val errors: List<String>,
 )
@@ -206,6 +208,14 @@ class HomeState(
     /** Sorted + filtered view that the list renders. */
     var filteredApkFiles by mutableStateOf<List<ApkFile>>(emptyList())
         private set
+
+    /**
+     * Smart facts about the whole collection (sizes, apps, duplicates).
+     * Recomputed lazily in [applyFilter] whenever the master list changed.
+     */
+    var insights by mutableStateOf(StorageInsights.EMPTY)
+        private set
+    private var insightsDirty = true
 
     var selectedPaths by mutableStateOf<Set<String>>(emptySet())
         private set
@@ -417,6 +427,7 @@ class HomeState(
         apkIndex.clear()
         positionByPath.clear()
         filteredApkFiles = emptyList()
+        insightsDirty = true
 
         try {
             val result = scannerService.scanAllStorage(
@@ -437,6 +448,7 @@ class HomeState(
                 positionByPath[apk.path] = i
             }
             scanFoundCount = result.allFiles.size
+            insightsDirty = true
             applyFilter()
 
             if (result.cancelled) {
@@ -494,6 +506,7 @@ class HomeState(
             allApkFiles[position] = apk
         }
         apkIndex[apk.path] = apk
+        insightsDirty = true
     }
 
     /** Replaces the entry at [oldPath] with [apk] (used after rename/move). */
@@ -514,6 +527,7 @@ class HomeState(
                 add(apk.path)
             }
         }
+        insightsDirty = true
     }
 
     /** Removes [path] from every in-memory structure. */
@@ -533,11 +547,20 @@ class HomeState(
         if (selectedPaths.contains(path)) {
             selectedPaths = selectedPaths - path
         }
+        insightsDirty = true
     }
 
     // --- filtering / sorting -------------------------------------------------
 
     fun applyFilter() {
+        // Insights depend only on the master list — recomputing here (and
+        // only when the list actually changed) keeps search/sort/filter
+        // keystrokes free of extra work.
+        if (insightsDirty) {
+            insights = StorageInsights.compute(allApkFiles)
+            insightsDirty = false
+        }
+
         if (selectedPaths.isNotEmpty()) {
             selectedPaths = selectedPaths.filterTo(LinkedHashSet()) { apkIndex.containsKey(it) }
         }
@@ -744,18 +767,22 @@ class HomeState(
             )
             if (!confirmed) return@launch
             val paths = selectedPaths.toList()
-            val failed = mutableListOf<String>()
-            for (path in paths) {
-                try {
-                    ApkManager.deleteApk(path)
+            // Deletes run on a small worker pool — deleting dozens of files
+            // no longer takes one filesystem round-trip at a time.
+            val deleteOk = arrayOfNulls<Boolean>(paths.size)
+            runParallel(paths.size, DELETE_CONCURRENCY) { index ->
+                deleteOk[index] = try {
+                    ApkManager.deleteApk(paths[index])
+                    true
                 } catch (_: ApkManagerException) {
-                    failed.add(path)
+                    false
                 }
             }
-            for (path in paths) {
-                if (failed.contains(path)) continue
-                removeEntry(path)
+            for (i in paths.indices) {
+                if (deleteOk[i] != true) continue
+                removeEntry(paths[i])
             }
+            val failed = paths.filterIndexed { index, _ -> deleteOk[index] != true }
             selectedPaths = emptySet()
             applyFilter()
             when {
@@ -988,10 +1015,14 @@ class HomeState(
             }
             try {
                 val roots = ApkManager.getDirectories()
-                directoryPicker = DirectoryPickerRequest(roots) { selectedDir ->
+                val recent = withContext(Dispatchers.IO) {
+                    PreferencesService.lastUsedDirectory
+                        ?.takeIf { File(it).isDirectory }
+                }
+                directoryPicker = DirectoryPickerRequest(roots, { selectedDir ->
                     directoryPicker = null
                     if (selectedDir != null) performMove(paths, selectedDir)
-                }
+                }, recent)
             } catch (e: ApkManagerException) {
                 snackbar.show(e.message ?: "", isError = true)
             }
@@ -1002,6 +1033,11 @@ class HomeState(
         scope.launch {
             try {
                 val summary = fileOperations.batchMove(paths, destDir)
+                if (summary.succeeded > 0) {
+                    // Remember the destination so the next move/backup can
+                    // reuse it with one tap from the folder picker.
+                    PreferencesService.setLastUsedDirectory(destDir)
+                }
                 for (r in summary.results) {
                     val newPath = r.destPath ?: continue
                     if (!r.success || r.skipped) continue
@@ -1180,11 +1216,12 @@ class HomeState(
             summaryData = SummaryData(
                 title = "Auto Organize Complete",
                 stats = listOf(
-                    "Total Files Scanned" to initialCount,
-                    "Files Renamed" to renameSummary.succeeded,
-                    "Rename Failures" to renameSummary.failed,
-                    "Duplicate Groups" to dupSummary.duplicateGroups,
-                    "Duplicates Removed" to dupSummary.filesDeleted,
+                    "Total Files Scanned" to initialCount.toString(),
+                    "Files Renamed" to renameSummary.succeeded.toString(),
+                    "Rename Failures" to renameSummary.failed.toString(),
+                    "Duplicate Groups" to dupSummary.duplicateGroups.toString(),
+                    "Duplicates Removed" to dupSummary.filesDeleted.toString(),
+                    "Space Reclaimed" to dupSummary.formattedBytesFreed,
                 ),
                 details = buildList {
                     if (renameSummary.succeeded > 0) {
@@ -1221,6 +1258,94 @@ class HomeState(
         if (!scannerService.isScanning) return
         stopRequested = true
         snackbar.show("Stopping scan…")
+    }
+
+    // --- duplicate cleanup (from the Smart Insights card) --------------------
+
+    /**
+     * One-tap removal of redundant copies, driven by the same analysis that
+     * renders the insights card and the "Duplicate" badges: the newest copy
+     * of each app/version is kept, everything else is deleted.
+     */
+    fun cleanDuplicates() {
+        if (!hasPermission) {
+            snackbar.show(
+                "Storage permission required to delete duplicate files.",
+                isError = true,
+            )
+            return
+        }
+        if (isLoading) {
+            snackbar.show("Wait for the scan to finish before cleaning up.")
+            return
+        }
+        val current = insights
+        if (!current.hasDuplicates) {
+            snackbar.show("No duplicates found — nothing to clean.")
+            return
+        }
+        scope.launch {
+            val confirmed = suspendConfirm(
+                "Remove Duplicates",
+                "Remove ${current.duplicateFiles} duplicate file(s) in " +
+                    "${current.duplicateGroups} group(s) and free " +
+                    "${current.formattedReclaimable}?\n\n" +
+                    "The newest copy of each app is always kept.",
+            )
+            if (!confirmed) return@launch
+            runDuplicateCleanup()
+        }
+    }
+
+    private suspend fun runDuplicateCleanup() {
+        val token = CancellationToken()
+        val progress = OrganizeProgressState(token)
+        progress.phase = "Removing duplicates"
+        organizeProgress = progress
+
+        try {
+            val summary = duplicateHandler.removeDuplicates(
+                allApkFiles.toList(),
+                onProgress = { done, total ->
+                    progress.done = done
+                    progress.total = total
+                    progress.phase = "Removing duplicates"
+                },
+                isCancelled = { token.isCancelled },
+            )
+
+            for (path in summary.deletedPaths) {
+                removeEntry(path)
+            }
+            selectedPaths = emptySet()
+            applyFilter()
+
+            organizeProgress = null
+            summaryData = SummaryData(
+                title = "Duplicate Cleanup Complete",
+                stats = listOf(
+                    "Duplicate Groups" to summary.duplicateGroups.toString(),
+                    "Files Removed" to summary.filesDeleted.toString(),
+                    "Files Kept" to summary.filesKept.toString(),
+                    "Space Reclaimed" to summary.formattedBytesFreed,
+                ),
+                details = buildList {
+                    add("Kept the newest copy in each duplicate group")
+                    if (summary.filesDeleted > 0) {
+                        add("Freed ${summary.formattedBytesFreed} of storage")
+                    }
+                    if (summary.errors.isNotEmpty()) {
+                        add("${summary.errors.size} file(s) could not be removed")
+                    }
+                },
+                errors = summary.errors,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            organizeProgress = null
+            snackbar.show("Duplicate cleanup failed: $e", isError = true)
+        }
     }
 
     // --- misc actions --------------------------------------------------------
@@ -1333,6 +1458,7 @@ class HomeState(
         private const val MIN_RESUME_RESCAN_GAP_MS = 20_000L
         private const val INSTALL_SPACING_MS = 900L
         private const val UNDO_SNACKBAR_MS = 6_000L
+        private const val DELETE_CONCURRENCY = 4
     }
 }
 
@@ -1376,6 +1502,7 @@ fun HomePage(
             AppDrawerContent(
                 appVersion = appVersion,
                 apkCount = state.allApkFiles.size,
+                totalSizeLabel = state.insights.formattedTotalSize,
                 isDark = isDark,
                 onThemeToggle = { state.toggleTheme() },
                 onItemSelected = { route ->
@@ -1452,7 +1579,11 @@ fun HomePage(
                 )
             },
             bottomBar = {
-                if (state.selectedPaths.isNotEmpty()) {
+                AnimatedVisibility(
+                    visible = state.selectedPaths.isNotEmpty(),
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                ) {
                     SelectionBottomBar(
                         selectedCount = state.selectedPaths.size,
                         totalCount = state.filteredApkFiles.size,
@@ -1527,6 +1658,7 @@ fun HomePage(
             initialDirectories = picker.initialDirectories,
             onSelect = picker.onSelect,
             onMessage = { message, isError -> snackbar.show(message, isError = isError) },
+            recentDirectoryPath = picker.recentPath,
         )
     }
 
@@ -1657,7 +1789,7 @@ private fun SortMenuButton(state: HomeState) {
         ApkSortMode.NAME to Icons.Filled.SortByAlpha,
         ApkSortMode.SIZE to Icons.Outlined.Storage,
         ApkSortMode.DATE to Icons.Filled.Schedule,
-        ApkSortMode.VERSION to Icons.Outlined.Tag,
+        ApkSortMode.VERSION to Icons.Outlined.Label,
     )
 
     Box {
@@ -1727,7 +1859,7 @@ private fun ApkCountBadge(count: Int) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Icons.Outlined.FolderZip,
+            Icons.Outlined.Folder,
             contentDescription = null,
             tint = scheme.onPrimaryContainer,
             modifier = Modifier.size(16.dp),
@@ -1817,7 +1949,7 @@ private fun HomeBody(state: HomeState, context: android.content.Context) {
                 }
                 Spacer(Modifier.height(20.dp))
                 TextButton(onClick = { state.stopScan() }) {
-                    Icon(Icons.Outlined.StopCircleCompat, contentDescription = null)
+                    Icon(Icons.Outlined.Stop, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Stop")
                 }
@@ -1830,13 +1962,23 @@ private fun HomeBody(state: HomeState, context: android.content.Context) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Icon(
-                    Icons.Outlined.FolderOpen,
-                    contentDescription = null,
-                    tint = scheme.outline,
-                    modifier = Modifier.size(80.dp),
-                )
-                Spacer(Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .background(
+                            scheme.primaryContainer.withAlpha(70),
+                            androidx.compose.foundation.shape.CircleShape,
+                        )
+                        .padding(28.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Outlined.FolderOpen,
+                        contentDescription = null,
+                        tint = scheme.primary,
+                        modifier = Modifier.size(56.dp),
+                    )
+                }
+                Spacer(Modifier.height(20.dp))
                 Text(
                     if (state.searchQuery.isNotEmpty()) {
                         "No APK files match your search"
@@ -1878,10 +2020,24 @@ private fun HomeBody(state: HomeState, context: android.content.Context) {
                 bottom = 88.dp,
             ),
         ) {
+            if (!state.isLoading && !state.isSearching && state.allApkFiles.isNotEmpty()) {
+                item(key = "__insights__") {
+                    StorageInsightsCard(
+                        insights = state.insights,
+                        isScanning = state.isLoading,
+                        onCleanDuplicates = { state.cleanDuplicates() },
+                        modifier = Modifier.padding(
+                            horizontal = 12.dp,
+                            vertical = 6.dp,
+                        ),
+                    )
+                }
+            }
             items(state.filteredApkFiles, key = { it.path }) { apk ->
                 ApkListTile(
                     apk = apk,
                     isSelected = state.selectedPaths.contains(apk.path),
+                    isDuplicate = state.insights.duplicateCandidatePaths.contains(apk.path),
                     onTap = {
                         if (state.selectedPaths.isNotEmpty()) {
                             state.toggleSelection(apk)
@@ -1948,6 +2104,7 @@ private fun ScanProgressBar(state: HomeState) {
 private fun AppDrawerContent(
     appVersion: String,
     apkCount: Int,
+    totalSizeLabel: String,
     isDark: Boolean,
     onThemeToggle: () -> Unit,
     onItemSelected: (String) -> Unit,
@@ -2001,6 +2158,17 @@ private fun AppDrawerContent(
             NavigationDrawerItem(
                 icon = { Icon(Icons.Outlined.Folder, contentDescription = null) },
                 label = { Text("APK Manager ($apkCount)") },
+                badge = if (apkCount > 0 && totalSizeLabel != "0 B") {
+                    {
+                        Text(
+                            totalSizeLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    null
+                },
                 selected = true,
                 onClick = { onItemSelected("apk_manager") },
                 modifier = Modifier.padding(horizontal = 12.dp),
@@ -2060,7 +2228,7 @@ private fun AppDrawerContent(
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
             NavigationDrawerItem(
-                icon = { Icon(Icons.Outlined.PrivacyTip, contentDescription = null) },
+                icon = { Icon(Icons.Outlined.Security, contentDescription = null) },
                 label = { Text("Privacy Policy") },
                 selected = false,
                 onClick = { onItemSelected("privacy_policy") },
@@ -2396,10 +2564,10 @@ private fun FilterRow(
     onClick: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    androidx.compose.foundation.layout.Row(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .androidx.compose.foundation.clickable(onClick = onClick)
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

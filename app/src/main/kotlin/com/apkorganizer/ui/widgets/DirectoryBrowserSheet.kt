@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +53,10 @@ import kotlinx.coroutines.launch
  * Bottom sheet for choosing a destination folder: navigates the directory
  * tree, supports going back and creating new folders. A port of the Flutter
  * `DirectoryBrowserSheet`.
+ *
+ * When [recentDirectoryPath] is provided (the folder used by the previous
+ * move/backup), it is offered as a one-tap shortcut at the top of the root
+ * list — repeat operations no longer need to navigate the tree again.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +64,7 @@ fun DirectoryBrowserSheet(
     initialDirectories: List<DirectoryEntry>,
     onSelect: (String?) -> Unit,
     onMessage: (String, Boolean) -> Unit,
+    recentDirectoryPath: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -208,6 +214,25 @@ fun DirectoryBrowserSheet(
                                     titleWeight = FontWeight.W600,
                                     subtitle = path,
                                     onClick = { onSelect(path) },
+                                )
+                            }
+                        } else if (!recentDirectoryPath.isNullOrEmpty()) {
+                            item(key = "recent-folder") {
+                                DirectoryRow(
+                                    icon = Icons.Filled.Schedule,
+                                    iconTint = scheme.tertiary,
+                                    title = "Recently used folder",
+                                    titleColor = scheme.onSurface,
+                                    titleWeight = FontWeight.W500,
+                                    subtitle = recentDirectoryPath,
+                                    trailing = {
+                                        Icon(
+                                            Icons.Filled.ChevronRight,
+                                            contentDescription = null,
+                                            tint = scheme.onSurfaceVariant,
+                                        )
+                                    },
+                                    onClick = { onSelect(recentDirectoryPath) },
                                 )
                             }
                         }

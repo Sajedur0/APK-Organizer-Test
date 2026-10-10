@@ -15,8 +15,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.rounded.FolderOff
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -51,7 +51,7 @@ fun PermissionDeniedView(
                 .padding(24.dp),
         ) {
             Icon(
-                Icons.Rounded.FolderOff,
+                Icons.Rounded.Folder,
                 contentDescription = null,
                 tint = scheme.primary,
                 modifier = Modifier.size(56.dp),

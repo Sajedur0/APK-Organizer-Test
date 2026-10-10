@@ -22,14 +22,13 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.outlined.ChildCare
 import androidx.compose.material.icons.outlined.DataUsage
-import androidx.compose.material.icons.outlined.GppMaybe
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.MailOutline
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Update
-import androidx.compose.material.icons.rounded.PrivacyTip
+import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -111,7 +110,7 @@ fun PrivacyPolicyPage(
                         .padding(12.dp),
                 ) {
                     Icon(
-                        Icons.Rounded.PrivacyTip,
+                        Icons.Outlined.Security,
                         contentDescription = null,
                         tint = scheme.primary,
                         modifier = Modifier.size(24.dp),
@@ -229,7 +228,7 @@ fun PrivacyPolicyPage(
             Spacer(Modifier.height(16.dp))
 
             PolicySection(
-                icon = Icons.Outlined.GppMaybe,
+                icon = Icons.Outlined.VerifiedUser,
                 title = "8. Your Rights & Control",
                 content = "You have complete control over your data:\n\n" +
                     "• Uninstall the app at any time — this removes all locally stored data.\n" +

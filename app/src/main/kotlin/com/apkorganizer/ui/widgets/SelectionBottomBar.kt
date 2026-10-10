@@ -1,6 +1,7 @@
 package com.apkorganizer.ui.widgets
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
@@ -36,7 +38,6 @@ import androidx.compose.ui.unit.dp
 import com.apkorganizer.ui.theme.DeepOrange
 
 /** Selection action bar shown when APK files are multi-selected. */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SelectionBottomBar(
     selectedCount: Int,
@@ -99,7 +100,12 @@ fun SelectionBottomBar(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Horizontally scrollable so all five actions stay reachable even on
+        // narrow screens.
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             CompactActionChip(
                 icon = Icons.Filled.InstallMobile,
                 label = "Install",

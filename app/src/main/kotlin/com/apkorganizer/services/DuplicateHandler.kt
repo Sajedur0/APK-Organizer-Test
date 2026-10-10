@@ -59,7 +59,12 @@ class DuplicateRemovalSummary(
     val filesKept: Int,
     val deletedPaths: List<String>,
     val errors: List<String>,
-)
+    /** Total size of the files that were actually deleted. */
+    val bytesFreed: Long = 0L,
+) {
+    val formattedBytesFreed: String
+        get() = com.apkorganizer.utils.FormatUtil.formatBytes(bytesFreed)
+}
 
 /** Analysis result: true duplicate groups + apps present in several versions. */
 class DuplicateAnalysis(
@@ -152,7 +157,7 @@ class DuplicateHandler {
                 "Duplicates",
                 "No duplicate identities among ${files.size} file(s); skipping removal",
             )
-            return DuplicateRemovalSummary(0, 0, 0, emptyList(), emptyList())
+            return DuplicateRemovalSummary(0, 0, 0, emptyList(), emptyList(), 0L)
         }
 
         val groups = findDuplicates(files)
@@ -176,11 +181,16 @@ class DuplicateHandler {
         }
 
         var done = 0
+        // Only mutated on the caller's dispatcher (runParallel workers pull
+        // indexes but resume on the same single-threaded context), matching
+        // the unsynchronized `deletedPaths` accumulation above.
+        var freedBytes = 0L
         runParallel(totalDeletes, concurrency, isCancelled) { index ->
             val file = toDelete[index]
             try {
                 ApkManager.deleteApk(file.path)
                 deletedPaths.add(file.path)
+                freedBytes += file.size
             } catch (e: ApkManagerException) {
                 errors.add("Failed to delete ${file.fileName}: ${e.message}")
                 logger.error(
@@ -199,13 +209,14 @@ class DuplicateHandler {
             filesKept = filesKept,
             deletedPaths = deletedPaths,
             errors = errors,
+            bytesFreed = freedBytes,
         )
 
         logger.info(
             "Duplicates",
             "Removal complete: ${summary.duplicateGroups} groups, " +
-                "${summary.filesDeleted} deleted, ${summary.filesKept} kept, " +
-                "${summary.errors.size} error(s)",
+                "${summary.filesDeleted} deleted (${summary.formattedBytesFreed} freed), " +
+                "${summary.filesKept} kept, ${summary.errors.size} error(s)",
         )
 
         return summary

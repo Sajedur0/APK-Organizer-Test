@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.0] — Smart Insights & polish
+- **Smart Insights card** — a live overview above the APK list: total file
+  count, combined size and distinct app count, computed in a single O(n)
+  pass whenever the list changes (never on search/sort keystrokes)
+- **Duplicate awareness everywhere** — the insights card shows how many
+  redundant copies exist and exactly how much space removing them would
+  free; every redundant file gets a small "Duplicate" badge in the list,
+  using the exact same keep-newest rules as duplicate removal, so the UI
+  can never disagree with what cleanup actually deletes
+- **One-tap duplicate cleanup** — a "Clean" action on the insights card
+  removes redundant copies (newest kept) with confirmation, progress
+  dialog and a summary that reports the **space reclaimed**
+- **Smart Organize summary** now also reports the space reclaimed by
+  duplicate removal
+- **Folder memory** — the last folder used for a move or backup is
+  remembered and offered as a "Recently used folder" shortcut at the top
+  of the directory picker
+- **Faster batch delete** — deleting many selected files now runs on a
+  bounded worker pool instead of one file at a time
+- Selection action bar slides in/out with animation and its five action
+  chips scroll horizontally on narrow screens
+- Refreshed empty state and a total-size badge in the navigation drawer
+- Fixed several compile-blocking issues from the initial Kotlin rewrite
+  (invalid icon references, a broken modifier chain in the directory
+  filter sheet, an invalid `Canvas` size modifier and missing imports) so
+  the project builds cleanly again
+
 ## [1.0.9] — Kotlin rewrite
 - The entire app was rewritten in **Kotlin with Jetpack Compose (Material 3)**,
   replacing the Flutter/Dart UI and the MethodChannel bridge with a pure

@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Check
@@ -238,10 +239,14 @@ class InstalledAppsState(
         scope.launch {
             try {
                 val roots = ApkManager.getDirectories()
-                directoryPicker = DirectoryPickerRequest(roots) { selected ->
+                val recent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.apkorganizer.services.PreferencesService.lastUsedDirectory
+                        ?.takeIf { java.io.File(it).isDirectory }
+                }
+                directoryPicker = DirectoryPickerRequest(roots, { selected ->
                     directoryPicker = null
                     onPicked(selected)
-                }
+                }, recent)
             } catch (e: ApkManagerException) {
                 snackbar.show(e.message ?: "", isError = true)
             }
@@ -254,6 +259,7 @@ class InstalledAppsState(
             scope.launch {
                 try {
                     val result = ApkManager.backupInstalledApp(app.packageName, dir)
+                    com.apkorganizer.services.PreferencesService.setLastUsedDirectory(dir)
                     snackbar.show(
                         "Backup saved: ${(result["fileName"] as? String) ?: app.displayName}",
                     )
@@ -290,6 +296,9 @@ class InstalledAppsState(
                 }
                 val ok = failures.count { !it }
                 val fail = failures.size - ok
+                if (ok > 0) {
+                    com.apkorganizer.services.PreferencesService.setLastUsedDirectory(dir)
+                }
                 isLoading = false
                 backupProgress = ""
                 selectedPackages = emptySet()
@@ -616,6 +625,7 @@ fun InstalledAppsPage(
             initialDirectories = picker.initialDirectories,
             onSelect = picker.onSelect,
             onMessage = { message, isError -> snackbar.show(message, isError = isError) },
+            recentDirectoryPath = picker.recentPath,
         )
     }
 
@@ -841,7 +851,3 @@ private fun InstalledAppsBottomBar(
         }
     }
 }
-
-/** Alias so the error icon import stays readable. */
-private val Icons.Outlined.ErrorOutlineCompat
-    get() = androidx.compose.material.icons.outlined.ErrorOutline

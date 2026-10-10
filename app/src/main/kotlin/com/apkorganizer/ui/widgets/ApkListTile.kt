@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.MoreVert
@@ -66,6 +67,12 @@ fun ApkListTile(
     onMove: () -> Unit,
     onDetails: (() -> Unit)? = null,
     onShare: (() -> Unit)? = null,
+    /**
+     * Marks this file as a redundant copy (another file of the same app +
+     * version will be kept). Comes from the Smart Insights analysis, so it
+     * always matches what "Clean duplicates" would remove.
+     */
+    isDuplicate: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -155,6 +162,33 @@ fun ApkListTile(
                             fontWeight = FontWeight.W600,
                         )
                     }
+                    if (isDuplicate) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    scheme.tertiaryContainer,
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Filled.ContentCopy,
+                                    contentDescription = null,
+                                    tint = scheme.onTertiaryContainer,
+                                    modifier = Modifier.size(10.dp),
+                                )
+                                Spacer(Modifier.width(3.dp))
+                                Text(
+                                    "Duplicate",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = scheme.onTertiaryContainer,
+                                    fontWeight = FontWeight.W600,
+                                )
+                            }
+                        }
+                    }
                     Spacer(Modifier.width(6.dp))
                     Text(
                         apk.formattedSize,
@@ -162,6 +196,7 @@ fun ApkListTile(
                         color = scheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                 }
                 Spacer(Modifier.height(2.dp))

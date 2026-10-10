@@ -19,12 +19,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.EventAvailable
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Numbers
-import androidx.compose.material.icons.outlined.Source
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -170,7 +171,7 @@ fun InstalledAppDetailPage(
                 Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Column {
                         AppInfoRow(Icons.Outlined.Info, "Version", app.versionName)
-                        AppInfoRow(Icons.Outlined.Numbers, "Version Code", app.versionCode.toString())
+                        AppInfoRow(Icons.Outlined.Code, "Version Code", app.versionCode.toString())
                         AppInfoRow(
                             Icons.Outlined.Category,
                             "Type",
@@ -188,7 +189,7 @@ fun InstalledAppDetailPage(
             InfoCard {
                 Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Column {
-                        AppInfoRow(Icons.Outlined.Source, "Source", app.sourceDir)
+                        AppInfoRow(Icons.Outlined.Description, "Source", app.sourceDir)
                         AppInfoRow(Icons.Outlined.EventAvailable, "Updated", installedDate)
                     }
                 }
@@ -198,7 +199,7 @@ fun InstalledAppDetailPage(
             Row {
                 Box(Modifier.weight(1f)) {
                     CompactActionChip(
-                        icon = androidx.compose.material.icons.Icons.Outlined.Archive,
+                        icon = Icons.Outlined.Archive,
                         label = "Backup APK",
                         color = scheme.primary,
                         onTap = onBackup,

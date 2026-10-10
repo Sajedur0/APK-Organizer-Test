@@ -21,6 +21,7 @@ object PreferencesService {
     private const val KEY_THEME_MODE = "pref_theme_mode"
     private const val KEY_SORT_MODE = "pref_sort_mode"
     private const val KEY_SORT_ASCENDING = "pref_sort_ascending"
+    private const val KEY_LAST_DIRECTORY = "pref_last_used_directory"
 
     private var prefs: SharedPreferences? = null
     private var initialized = false
@@ -81,6 +82,32 @@ object PreferencesService {
                 ?.apply()
         } catch (error: Exception) {
             Log.w("PreferencesService", "setSort failed: $error")
+        }
+    }
+
+    // --- Last used destination -------------------------------------------------
+
+    /**
+     * The folder used most recently for a move/backup. Shown as a shortcut at
+     * the top of the directory picker so repeat operations take one tap.
+     */
+    val lastUsedDirectory: String?
+        get() = try {
+            prefs?.getString(KEY_LAST_DIRECTORY, null)?.takeIf { it.isNotEmpty() }
+        } catch (error: Exception) {
+            Log.w("PreferencesService", "lastUsedDirectory read failed: $error")
+            null
+        }
+
+    fun setLastUsedDirectory(path: String?) {
+        try {
+            if (path.isNullOrEmpty()) {
+                prefs?.edit()?.remove(KEY_LAST_DIRECTORY)?.apply()
+            } else {
+                prefs?.edit()?.putString(KEY_LAST_DIRECTORY, path)?.apply()
+            }
+        } catch (error: Exception) {
+            Log.w("PreferencesService", "setLastUsedDirectory failed: $error")
         }
     }
 
