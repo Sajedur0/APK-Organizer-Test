@@ -1581,8 +1581,8 @@ fun HomePage(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = scheme.surface,
-                        scrolledContainerColor = scheme.surface,
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent,
                     ),
                 )
             },
@@ -1631,7 +1631,7 @@ fun HomePage(
                     }
                 }
             },
-            containerColor = scheme.surface,
+            containerColor = Color.Transparent,
         ) { padding ->
             Box(
                 Modifier
@@ -2097,7 +2097,7 @@ private fun ScanProgressBar(state: HomeState) {
             .clip(AppRadius.controlShape)
             .background(scheme.surfaceContainerLow)
             .border(
-                BorderStroke(1.dp, scheme.outlineVariant.withAlpha(90)),
+                BorderStroke(1.dp, Color.White.withAlpha(25)),
                 AppRadius.controlShape,
             )
             .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),

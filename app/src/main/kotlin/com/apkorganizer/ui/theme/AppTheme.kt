@@ -15,15 +15,15 @@ import androidx.compose.ui.unit.dp
 /**
  * Single source of truth for corner radii.
  *
- * Everything rounded comes from here: cards 18, controls 14, dialogs 24,
- * sheets 30, chips 10 — the softened, more modern radii of the v2 design.
+ * The v3 glassmorphism design uses generous, soft radii: cards 24, controls
+ * 16, dialogs 28, sheets 32, chips 12.
  */
 object AppRadius {
-    val card = 18.dp
-    val control = 14.dp
-    val dialog = 24.dp
-    val sheet = 30.dp
-    val chip = 10.dp
+    val card = 24.dp
+    val control = 16.dp
+    val dialog = 28.dp
+    val sheet = 32.dp
+    val chip = 12.dp
 
     val cardShape: RoundedCornerShape get() = RoundedCornerShape(card)
     val controlShape: RoundedCornerShape get() = RoundedCornerShape(control)
@@ -35,17 +35,27 @@ object AppRadius {
 val DeepOrange = Color(0xFFFF5722)
 
 /**
- * Signature gradients of the v2 redesign: a deep-emerald → bright-teal
- * brand sweep used by the hero card, app bar identity mark, drawer header
- * and empty states.
+ * Signature brushes of the glassmorphism redesign.
+ *
+ * [hero] is a translucent deep-green → sage sweep (white text sits on it in
+ * both themes), while [backdrop] paints the frosted deep-green canvas the
+ * glass surfaces float on.
  */
 object AppGradients {
     val hero: List<Color>
         @Composable get() =
             if (LocalIsDarkTheme.current) {
-                listOf(Color(0xFF04423A), Color(0xFF0B6B5A))
+                listOf(Color(0xE61E4430), Color(0xB337684A))
             } else {
-                listOf(Color(0xFF00695C), Color(0xFF00997F))
+                listOf(Color(0xE63E6B4A), Color(0xCC79A57F))
+            }
+
+    val backdrop: List<Color>
+        @Composable get() =
+            if (LocalIsDarkTheme.current) {
+                listOf(Color(0xFF0D1F16), Color(0xFF123122))
+            } else {
+                listOf(Color(0xFFEAF2E6), Color(0xFFDCE9D6))
             }
 }
 
@@ -55,89 +65,97 @@ val LocalAppDividerColor = staticCompositionLocalOf { Color.Unspecified }
 /** Whether the dark theme is currently active (exposed to widgets). */
 val LocalIsDarkTheme = staticCompositionLocalOf { false }
 
-private val LightScheme: ColorScheme = lightColorScheme(
-    primary = Color(0xFF006C5B),
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFF9EF2D9),
-    onPrimaryContainer = Color(0xFF002019),
-    inversePrimary = Color(0xFF82D5BE),
-    secondary = Color(0xFF5B5D00),
-    onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFE4E878),
-    onSecondaryContainer = Color(0xFF1B1C00),
-    tertiary = Color(0xFF8A4A00),
-    onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFFFDDB9),
-    onTertiaryContainer = Color(0xFF2C1600),
-    background = Color(0xFFFAFCF7),
-    onBackground = Color(0xFF191C1A),
-    surface = Color(0xFFFAFCF7),
-    onSurface = Color(0xFF191C1A),
-    surfaceVariant = Color(0xFFE7E9E4),
-    onSurfaceVariant = Color(0xFF414944),
-    surfaceTint = Color(0xFF006C5B),
-    inverseSurface = Color(0xFF2E312F),
-    inverseOnSurface = Color(0xFFF0F1ED),
-    error = Color(0xFFBA1A1A),
-    onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFFDAD6),
-    onErrorContainer = Color(0xFF410002),
-    outline = Color(0xFF717971),
-    outlineVariant = Color(0xFFC1C9C0),
-    scrim = Color(0xFF000000),
-    surfaceBright = Color(0xFFFAFCF7),
-    surfaceDim = Color(0xFFDADBD6),
-    surfaceContainer = Color(0xFFEDEFEA),
-    surfaceContainerHigh = Color(0xFFE7E9E4),
-    surfaceContainerHighest = Color(0xFFE1E3DF),
-    surfaceContainerLow = Color(0xFFF3F6F1),
-    surfaceContainerLowest = Color(0xFFFFFFFF),
-)
-
+/**
+ * Deep-forest "Leafora-style" dark scheme.
+ *
+ * The container tokens are translucent white, so every card, dialog, sheet
+ * and bar reads as frosted glass floating on the green backdrop — the core
+ * of the glassmorphism look.
+ */
 private val DarkScheme: ColorScheme = darkColorScheme(
-    primary = Color(0xFF82D5BE),
-    onPrimary = Color(0xFF00382F),
-    primaryContainer = Color(0xFF005144),
-    onPrimaryContainer = Color(0xFF9EF2D9),
-    inversePrimary = Color(0xFF006C5B),
-    secondary = Color(0xFFC8CB60),
-    onSecondary = Color(0xFF2F3100),
-    secondaryContainer = Color(0xFF444600),
-    onSecondaryContainer = Color(0xFFE4E878),
-    tertiary = Color(0xFFFFB866),
-    onTertiary = Color(0xFF492900),
-    tertiaryContainer = Color(0xFF683C00),
-    onTertiaryContainer = Color(0xFFFFDDB9),
-    background = Color(0xFF101412),
-    onBackground = Color(0xFFE0E4DE),
-    surface = Color(0xFF101412),
-    onSurface = Color(0xFFE0E4DE),
-    surfaceVariant = Color(0xFF282B29),
-    onSurfaceVariant = Color(0xFFC1C9C0),
-    surfaceTint = Color(0xFF82D5BE),
-    inverseSurface = Color(0xFFE0E4DE),
-    inverseOnSurface = Color(0xFF2E312F),
+    primary = Color(0xFFABD3A4),
+    onPrimary = Color(0xFF1B3524),
+    primaryContainer = Color(0xFF2C4E37),
+    onPrimaryContainer = Color(0xFFD2E8C9),
+    inversePrimary = Color(0xFF477A52),
+    secondary = Color(0xFFA9CDBD),
+    onSecondary = Color(0xFF14342B),
+    secondaryContainer = Color(0xFF2A4A3F),
+    onSecondaryContainer = Color(0xFFC9E6DA),
+    tertiary = Color(0xFFDCC69C),
+    onTertiary = Color(0xFF3C3012),
+    tertiaryContainer = Color(0xFF544626),
+    onTertiaryContainer = Color(0xFFF2E1BC),
+    background = Color(0xFF0B1712),
+    onBackground = Color(0xFFDFE8DC),
+    surface = Color(0xFF0B1712),
+    onSurface = Color(0xFFDFE8DC),
+    surfaceVariant = Color(0x27FFFFFF),
+    onSurfaceVariant = Color(0xFFB4C6B2),
+    surfaceTint = Color(0xFFABD3A4),
+    inverseSurface = Color(0xFFDFE8DC),
+    inverseOnSurface = Color(0xFF233127),
     error = Color(0xFFFFB4AB),
     onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A),
     onErrorContainer = Color(0xFFFFDAD6),
-    outline = Color(0xFF8B938B),
-    outlineVariant = Color(0xFF414944),
+    outline = Color(0xFF7F927E),
+    outlineVariant = Color(0xFF3A5243),
     scrim = Color(0xFF000000),
-    surfaceBright = Color(0xFF363A38),
-    surfaceDim = Color(0xFF101412),
-    surfaceContainer = Color(0xFF1D211F),
-    surfaceContainerHigh = Color(0xFF282B29),
-    surfaceContainerHighest = Color(0xFF333634),
-    surfaceContainerLow = Color(0xFF191C1A),
-    surfaceContainerLowest = Color(0xFF0B0F0D),
+    surfaceBright = Color(0xFF27392C),
+    surfaceDim = Color(0xFF0B1712),
+    surfaceContainer = Color(0x1FFFFFFF),
+    surfaceContainerHigh = Color(0x29FFFFFF),
+    surfaceContainerHighest = Color(0x33FFFFFF),
+    surfaceContainerLow = Color(0x14FFFFFF),
+    surfaceContainerLowest = Color(0xFF07110C),
+)
+
+/** Frosted light scheme — white glass over a pale sage canvas. */
+private val LightScheme: ColorScheme = lightColorScheme(
+    primary = Color(0xFF3C6B4B),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFCDE5C4),
+    onPrimaryContainer = Color(0xFF0F2A19),
+    inversePrimary = Color(0xFFB1C9A6),
+    secondary = Color(0xFF526357),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFD5E8D9),
+    onSecondaryContainer = Color(0xFF101F16),
+    tertiary = Color(0xFF6B5B3C),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFF1DFB8),
+    onTertiaryContainer = Color(0xFF241903),
+    background = Color(0xFFEFF4EB),
+    onBackground = Color(0xFF1A241C),
+    surface = Color(0xFFEFF4EB),
+    onSurface = Color(0xFF1A241C),
+    surfaceVariant = Color(0xCCFFFFFF),
+    onSurfaceVariant = Color(0xFF455245),
+    surfaceTint = Color(0xFF3C6B4B),
+    inverseSurface = Color(0xFF2B382C),
+    inverseOnSurface = Color(0xFFF0F6EC),
+    error = Color(0xFFBA1A1A),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002),
+    outline = Color(0xFF75846F),
+    outlineVariant = Color(0xFFC6D5C0),
+    scrim = Color(0xFF000000),
+    surfaceBright = Color(0xFFFFFFFF),
+    surfaceDim = Color(0xFFD8E2D2),
+    surfaceContainer = Color(0xCCFFFFFF),
+    surfaceContainerHigh = Color(0xD9FFFFFF),
+    surfaceContainerHighest = Color(0xE6FFFFFF),
+    surfaceContainerLow = Color(0xB3FFFFFF),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
 )
 
 private val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(AppRadius.chip),
     small = RoundedCornerShape(AppRadius.control),
     medium = RoundedCornerShape(AppRadius.card),
-    large = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(28.dp),
     extraLarge = RoundedCornerShape(AppRadius.dialog),
 )
 

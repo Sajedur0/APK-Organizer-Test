@@ -106,12 +106,12 @@ fun InstalledAppDetailPage(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = scheme.surface,
-                    scrolledContainerColor = scheme.surface,
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
                 ),
             )
         },
-        containerColor = scheme.surface,
+        containerColor = Color.Transparent,
     ) { padding ->
         Column(
             Modifier

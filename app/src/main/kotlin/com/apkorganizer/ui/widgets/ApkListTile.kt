@@ -80,7 +80,7 @@ fun ApkListTile(
     val containerColor =
         if (isSelected) scheme.primaryContainer.withAlpha(100) else scheme.surfaceContainerLow
     val borderColor =
-        if (isSelected) scheme.primary.withAlpha(160) else scheme.outlineVariant.withAlpha(90)
+        if (isSelected) scheme.primary.withAlpha(160) else Color.White.withAlpha(30)
     val borderWidth = if (isSelected) 1.5.dp else 1.dp
 
     var menuOpen by remember { mutableStateOf(false) }

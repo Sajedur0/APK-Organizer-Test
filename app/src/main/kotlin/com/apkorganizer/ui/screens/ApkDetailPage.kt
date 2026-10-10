@@ -117,12 +117,12 @@ fun ApkDetailPage(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = scheme.surface,
-                    scrolledContainerColor = scheme.surface,
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
                 ),
             )
         },
-        containerColor = scheme.surface,
+        containerColor = Color.Transparent,
     ) { padding ->
         Box(
             Modifier
@@ -229,7 +229,7 @@ private fun ApkDetailContent(
                     shape = RoundedCornerShape(AppRadius.card),
                     border = androidx.compose.foundation.BorderStroke(
                         1.dp,
-                        scheme.outlineVariant.copy(alpha = 120f / 255f),
+                        Color.White.copy(alpha = 0.14f),
                     ),
                 ) {
                     Column(Modifier.padding(vertical = 4.dp)) {
@@ -273,7 +273,7 @@ private fun ApkDetailHeader(detail: ApkDetailInfo) {
         shape = RoundedCornerShape(AppRadius.card),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            scheme.outlineVariant.copy(alpha = 120f / 255f),
+            Color.White.copy(alpha = 0.14f),
         ),
     ) {
         Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -342,7 +342,7 @@ internal fun InfoCard(content: @Composable () -> Unit) {
         shape = RoundedCornerShape(AppRadius.card),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            scheme.outlineVariant.copy(alpha = 120f / 255f),
+            Color.White.copy(alpha = 0.14f),
         ),
     ) {
         Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {

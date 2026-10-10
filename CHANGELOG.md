@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.3.0] — Glassmorphism redesign
+- **Frosted glass design language** inspired by modern glassmorphism UI:
+  deep-forest green canvas with soft sage/sand glows, translucent white
+  container tokens, 1px light strokes and generous 24dp radii
+- **New palettes** — dark "Leafora forest" (sage primary, mint secondary,
+  sand tertiary) and a frosted light theme of white glass over pale sage
+- **GlassBackdrop** behind every screen: vertical green gradient plus two
+  radial glows; all scaffolds and top app bars are now transparent so the
+  glass floats on the canvas
+- Hero Smart Insights card, drawer header, brand mark, empty states and
+  detail headers get the translucent emerald→sage gradient with a light
+  glass border
+- Light/dark toggle still works — both themes are fully glass-styled
+- No behavior changes — all logic and operations remain identical
+
 ## [1.2.0] — Visual redesign (v2)
 - **New design language** — a deep-emerald → bright-teal signature gradient,
   softer radii (cards 18, controls 14, dialogs 24, sheets 30) and a cleaner

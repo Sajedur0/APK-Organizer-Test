@@ -461,8 +461,8 @@ fun InstalledAppsPage(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = scheme.surface,
-                    scrolledContainerColor = scheme.surface,
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
                 ),
             )
         },
@@ -481,7 +481,7 @@ fun InstalledAppsPage(
         snackbarHost = {
             com.apkorganizer.ui.widgets.ApkSnackbarHost(snackbar)
         },
-        containerColor = scheme.surface,
+        containerColor = Color.Transparent,
     ) { padding ->
         Box(
             Modifier
@@ -671,7 +671,7 @@ private fun InstalledAppTile(
     val containerColor =
         if (isSelected) scheme.primaryContainer.withAlpha(110) else scheme.surfaceContainerLow
     val borderColor =
-        if (isSelected) scheme.primary.withAlpha(140) else scheme.outlineVariant.withAlpha(120)
+        if (isSelected) scheme.primary.withAlpha(160) else Color.White.withAlpha(30)
 
     var menuOpen by remember { mutableStateOf(false) }
 
@@ -814,7 +814,7 @@ private fun InstalledAppsBottomBar(
             .shadow(16.dp, shape, spotColor = Color.Black.withAlpha(40))
             .clip(shape)
             .background(scheme.surfaceContainerHighest)
-            .border(BorderStroke(1.dp, scheme.outlineVariant.withAlpha(100)), shape)
+            .border(BorderStroke(1.dp, Color.White.withAlpha(30)), shape)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

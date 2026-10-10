@@ -1,6 +1,8 @@
 package com.apkorganizer.ui.widgets
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,7 +57,11 @@ fun StorageInsightsCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(AppRadius.cardShape)
-            .background(Brush.linearGradient(AppGradients.hero), AppRadius.cardShape),
+            .background(Brush.linearGradient(AppGradients.hero), AppRadius.cardShape)
+            .border(
+                BorderStroke(1.dp, Color.White.withAlpha(40)),
+                AppRadius.cardShape,
+            ),
     ) {
         // Header row
         Row(

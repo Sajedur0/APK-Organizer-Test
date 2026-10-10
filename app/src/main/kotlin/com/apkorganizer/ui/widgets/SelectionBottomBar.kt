@@ -69,7 +69,7 @@ fun SelectionBottomBar(
             .shadow(16.dp, shape, spotColor = Color.Black.copy(alpha = 40f / 255f))
             .clip(shape)
             .background(scheme.surfaceContainerHighest)
-            .border(BorderStroke(1.dp, scheme.outlineVariant.withAlpha(100)), shape)
+            .border(BorderStroke(1.dp, Color.White.withAlpha(30)), shape)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
