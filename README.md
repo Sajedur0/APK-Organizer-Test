@@ -20,6 +20,11 @@ A lightweight yet powerful Android utility built with **Kotlin + Jetpack Compose
 
 ---
 
+> **v1.3.1 — Deep frosted blur.** The Transparent Glossy system is now
+> heavily blurred: glass bars, snackbar and drawer blur the content behind
+> them, and dialogs/sheets blur the whole app behind their window — nothing
+> in the background stays visible.
+>
 > **v1.3.0 — Glassmorphism.** A frosted-glass design language: deep-forest
 > green canvas with sage glows, translucent white surfaces, light 1px
 > strokes and soft 24dp radii — in both dark and light themes. Built on

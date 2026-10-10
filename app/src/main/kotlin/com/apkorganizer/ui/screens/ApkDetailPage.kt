@@ -65,6 +65,9 @@ import com.apkorganizer.data.ApkManagerException
 import com.apkorganizer.data.ApkPermission
 import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.FrostedSurface
+import com.apkorganizer.ui.theme.LocalGlassBlurState
+import com.apkorganizer.ui.theme.glassBlurSource
 import com.apkorganizer.ui.widgets.FileImage
 import com.apkorganizer.ui.widgets.HexagonDotsLoading
 import kotlinx.coroutines.launch
@@ -103,6 +106,7 @@ fun ApkDetailPage(
 
     Scaffold(
         topBar = {
+            FrostedSurface(Modifier.fillMaxWidth()) {
             TopAppBar(
                 title = {
                     Text(
@@ -121,13 +125,15 @@ fun ApkDetailPage(
                     scrolledContainerColor = Color.Transparent,
                 ),
             )
+            }
         },
         containerColor = Color.Transparent,
     ) { padding ->
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .glassBlurSource(LocalGlassBlurState.current),
         ) {
             when {
                 isLoading -> {

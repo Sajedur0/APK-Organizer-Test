@@ -52,6 +52,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apkorganizer.data.ApkManager
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.FrostedSurface
+import com.apkorganizer.ui.theme.LocalGlassBlurState
+import com.apkorganizer.ui.theme.glassBlurSource
 import com.apkorganizer.ui.widgets.withAlpha
 
 /** The in-app Privacy Policy page — a verbatim port of the Flutter page. */
@@ -66,6 +69,7 @@ fun PrivacyPolicyPage(
 
     Scaffold(
         topBar = {
+            FrostedSurface(Modifier.fillMaxWidth()) {
             TopAppBar(
                 title = { Text("Privacy Policy") },
                 navigationIcon = {
@@ -78,6 +82,7 @@ fun PrivacyPolicyPage(
                     scrolledContainerColor = Color.Transparent,
                 ),
             )
+            }
         },
         containerColor = Color.Transparent,
     ) { padding ->
@@ -85,6 +90,7 @@ fun PrivacyPolicyPage(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .glassBlurSource(LocalGlassBlurState.current)
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp),
         ) {

@@ -33,6 +33,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.DialogBlurBehind
+import com.apkorganizer.ui.theme.glassDialogContainer
 import com.apkorganizer.ui.widgets.withAlpha
 
 /** Result summary dialog used after "Smart Organize" and duplicate cleanup. */
@@ -47,9 +49,10 @@ fun SummaryDialog(
     val scheme = MaterialTheme.colorScheme
 
     Dialog(onDismissRequest = onDismiss) {
+        DialogBlurBehind()
         Surface(
             shape = RoundedCornerShape(AppRadius.dialog),
-            color = scheme.surfaceContainerLow,
+            color = glassDialogContainer(),
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 550.dp)

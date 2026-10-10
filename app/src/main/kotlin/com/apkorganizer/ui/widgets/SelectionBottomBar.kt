@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apkorganizer.ui.theme.AppRadius
 import com.apkorganizer.ui.theme.DeepOrange
+import com.apkorganizer.ui.theme.FrostedSurface
 
 /** Floating selection action bar shown when APK files are multi-selected. */
 @Composable
@@ -59,17 +60,21 @@ fun SelectionBottomBar(
     val scheme = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(22.dp)
 
-    Column(
+    FrostedSurface(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
             .padding(
                 bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
             )
-            .shadow(16.dp, shape, spotColor = Color.Black.copy(alpha = 40f / 255f))
-            .clip(shape)
-            .background(scheme.surfaceContainerHighest)
-            .border(BorderStroke(1.dp, Color.White.withAlpha(30)), shape)
+            .shadow(16.dp, shape, spotColor = Color.Black.copy(alpha = 40f / 255f)),
+        shape = shape,
+        tint = scheme.surfaceContainerHighest,
+        border = BorderStroke(1.dp, Color.White.withAlpha(30)),
+    ) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -146,5 +151,6 @@ fun SelectionBottomBar(
                 onTap = onDelete,
             )
         }
+    }
     }
 }

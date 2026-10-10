@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.3.1] — Deep blur for the Transparent Glossy system
+- **Heavier frosted blur everywhere** so nothing behind the glass stays
+  visible: top bars, selection bars, the snackbar and the navigation drawer
+  now combine a painted canvas replica, a live snapshot of the content behind
+  blurred with a 52dp radius (Android 12+), a thick translucent glass tint
+  and a glossy rim
+- **Real window blur behind dialogs & bottom sheets** (Android 12+): the app
+  behind confirmations, rename, filters, directory browser, details and
+  summary sheets melts into a soft haze
+- **Thicker glass tokens** — translucent container alphas are raised in both
+  themes so cards and panels are properly frosted instead of clear
+- **Graceful fallback** — below Android 12 dialogs use opaque frosted slabs
+  so the background never shows through on any device
+
 ## [1.3.0] — Glassmorphism redesign
 - **Frosted glass design language** inspired by modern glassmorphism UI:
   deep-forest green canvas with soft sage/sand glows, translucent white

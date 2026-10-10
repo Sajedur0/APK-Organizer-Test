@@ -48,6 +48,8 @@ import androidx.compose.ui.window.Dialog
 import com.apkorganizer.R
 import com.apkorganizer.data.ApkManager
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.DialogBlurBehind
+import com.apkorganizer.ui.theme.glassDialogContainer
 import com.apkorganizer.ui.widgets.withAlpha
 
 /** The "About" dialog with gradient header, features row and credits. */
@@ -66,9 +68,10 @@ fun AboutDialog(
     }
 
     Dialog(onDismissRequest = onDismiss) {
+        DialogBlurBehind()
         Surface(
             shape = RoundedCornerShape(AppRadius.dialog),
-            color = scheme.surfaceContainerLow,
+            color = glassDialogContainer(),
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = 360.dp),

@@ -82,6 +82,9 @@ import com.apkorganizer.data.InstalledApp
 import com.apkorganizer.ui.AppScreen
 import com.apkorganizer.ui.ScreenIds
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.FrostedSurface
+import com.apkorganizer.ui.theme.LocalGlassBlurState
+import com.apkorganizer.ui.theme.glassBlurSource
 import com.apkorganizer.ui.widgets.CompactActionChip
 import com.apkorganizer.ui.widgets.ConfirmDialog
 import com.apkorganizer.ui.widgets.ConfirmRequest
@@ -397,6 +400,7 @@ fun InstalledAppsPage(
 
     Scaffold(
         topBar = {
+            FrostedSurface(Modifier.fillMaxWidth()) {
             TopAppBar(
                 title = {
                     if (state.isSearching) {
@@ -466,6 +470,7 @@ fun InstalledAppsPage(
                     scrolledContainerColor = Color.Transparent,
                 ),
             )
+            }
         },
         bottomBar = {
             if (state.selectedPackages.isNotEmpty()) {
@@ -487,7 +492,8 @@ fun InstalledAppsPage(
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .glassBlurSource(LocalGlassBlurState.current),
         ) {
             when {
                 state.isLoading && state.apps.isEmpty() -> {
@@ -807,15 +813,19 @@ private fun InstalledAppsBottomBar(
 ) {
     val scheme = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(22.dp)
-    Column(
+    FrostedSurface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
             .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
-            .shadow(16.dp, shape, spotColor = Color.Black.withAlpha(40))
-            .clip(shape)
-            .background(scheme.surfaceContainerHighest)
-            .border(BorderStroke(1.dp, Color.White.withAlpha(30)), shape)
+            .shadow(16.dp, shape, spotColor = Color.Black.withAlpha(40)),
+        shape = shape,
+        tint = scheme.surfaceContainerHighest,
+        border = BorderStroke(1.dp, Color.White.withAlpha(30)),
+    ) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -854,5 +864,6 @@ private fun InstalledAppsBottomBar(
                 onTap = onUninstall,
             )
         }
+    }
     }
 }
