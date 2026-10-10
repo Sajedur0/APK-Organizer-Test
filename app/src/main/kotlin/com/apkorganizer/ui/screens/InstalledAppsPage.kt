@@ -548,10 +548,10 @@ fun InstalledAppsPage(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
                                 .background(
                                     scheme.surfaceContainerHighest.withAlpha(128),
-                                    RoundedCornerShape(8.dp),
+                                    AppRadius.controlShape,
                                 )
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -805,12 +805,16 @@ private fun InstalledAppsBottomBar(
     onUninstall: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(22.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(12.dp, spotColor = Color.Black.withAlpha(26))
-            .background(scheme.surfaceContainerHighest)
+            .padding(horizontal = 12.dp)
             .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+            .shadow(16.dp, shape, spotColor = Color.Black.withAlpha(40))
+            .clip(shape)
+            .background(scheme.surfaceContainerHighest)
+            .border(BorderStroke(1.dp, scheme.outlineVariant.withAlpha(100)), shape)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

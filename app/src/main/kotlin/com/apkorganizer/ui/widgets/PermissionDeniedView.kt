@@ -25,9 +25,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppRadius
 
 /** Full-screen "storage permission required" view. */
@@ -47,13 +50,14 @@ fun PermissionDeniedView(
     ) {
         Box(
             modifier = Modifier
-                .background(scheme.primaryContainer.withAlpha(100), CircleShape)
-                .padding(24.dp),
+                .background(Brush.linearGradient(AppGradients.hero), CircleShape)
+                .padding(26.dp),
+            contentAlignment = Alignment.Center,
         ) {
             Icon(
                 Icons.Rounded.Folder,
                 contentDescription = null,
-                tint = scheme.primary,
+                tint = Color.White,
                 modifier = Modifier.size(56.dp),
             )
         }

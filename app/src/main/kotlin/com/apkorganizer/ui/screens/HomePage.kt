@@ -5,8 +5,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -94,7 +96,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -123,6 +126,7 @@ import com.apkorganizer.ui.AppScreen
 import com.apkorganizer.ui.ScreenIds
 import com.apkorganizer.ui.dialogs.AboutDialog
 import com.apkorganizer.ui.dialogs.SummaryDialog
+import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppRadius
 import com.apkorganizer.ui.theme.DeepOrange
 import com.apkorganizer.ui.widgets.ApkSnackbarHost
@@ -1528,10 +1532,14 @@ fun HomePage(
                             Box(modifier = Modifier.size(20.dp)) {
                                 HexagonDotsLoading(minRadius = 4.dp)
                             }
+                        } else {
+                            BrandTitle(
+                                fileCount = state.allApkFiles.size,
+                                totalSizeLabel = state.insights.formattedTotalSize,
+                            )
                         }
                     },
                     actions = {
-                        ApkCountBadge(count = state.allApkFiles.size)
                         if (state.isSearching) {
                             IconButton(
                                 onClick = {
@@ -1613,6 +1621,8 @@ fun HomePage(
                     } else {
                         ExtendedFloatingActionButton(
                             onClick = { state.scanApkFiles() },
+                            containerColor = scheme.primary,
+                            contentColor = scheme.onPrimary,
                         ) {
                             Icon(Icons.Filled.Refresh, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
@@ -1847,30 +1857,45 @@ private fun SortMenuButton(state: HomeState) {
     }
 }
 
+/** Brand identity block shown as the app bar title. */
 @Composable
-private fun ApkCountBadge(count: Int) {
+private fun BrandTitle(fileCount: Int, totalSizeLabel: String) {
     val scheme = MaterialTheme.colorScheme
-    Row(
-        modifier = Modifier
-            .padding(end = 8.dp)
-            .height(32.dp)
-            .background(scheme.primaryContainer, RoundedCornerShape(16.dp))
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Outlined.Folder,
-            contentDescription = null,
-            tint = scheme.onPrimaryContainer,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            "$count",
-            style = MaterialTheme.typography.labelLarge,
-            color = scheme.onPrimaryContainer,
-            fontWeight = FontWeight.W700,
-        )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .background(Brush.linearGradient(AppGradients.hero), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Android,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(
+                "APK Organizer",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (fileCount > 0) {
+                    "$fileCount file(s) · $totalSizeLabel"
+                } else {
+                    "Organize your APK files"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.outline,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -1965,7 +1990,7 @@ private fun HomeBody(state: HomeState, context: android.content.Context) {
                 Box(
                     modifier = Modifier
                         .background(
-                            scheme.primaryContainer.withAlpha(70),
+                            Brush.linearGradient(AppGradients.hero),
                             androidx.compose.foundation.shape.CircleShape,
                         )
                         .padding(28.dp),
@@ -1974,7 +1999,7 @@ private fun HomeBody(state: HomeState, context: android.content.Context) {
                     Icon(
                         Icons.Outlined.FolderOpen,
                         contentDescription = null,
-                        tint = scheme.primary,
+                        tint = Color.White,
                         modifier = Modifier.size(56.dp),
                     )
                 }
@@ -2059,7 +2084,7 @@ private fun HomeBody(state: HomeState, context: android.content.Context) {
     }
 }
 
-/** Thin progress strip shown above the list while a scan is running. */
+/** Rounded progress card shown above the list while a scan is running. */
 @Composable
 private fun ScanProgressBar(state: HomeState) {
     val scheme = MaterialTheme.colorScheme
@@ -2068,7 +2093,13 @@ private fun ScanProgressBar(state: HomeState) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(AppRadius.controlShape)
             .background(scheme.surfaceContainerLow)
+            .border(
+                BorderStroke(1.dp, scheme.outlineVariant.withAlpha(90)),
+                AppRadius.controlShape,
+            )
             .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -2114,46 +2145,54 @@ private fun AppDrawerContent(
         drawerContainerColor = scheme.surfaceContainerLow,
     ) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            // Header
-            Row(
+            // Gradient brand header
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 28.dp, top = 24.dp, end = 28.dp, bottom = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .background(Brush.linearGradient(AppGradients.hero))
+                    .padding(start = 24.dp, top = 28.dp, end = 24.dp, bottom = 22.dp),
             ) {
-                Image(
-                    painter = painterResource(R.drawable.app_icon),
-                    contentDescription = "APK Organizer",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .shadow(
-                            12.dp,
-                            RoundedCornerShape(14.dp),
-                            spotColor = Color.Black.withAlpha(60),
-                            ambientColor = Color.Black.withAlpha(60),
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .background(Color.White.withAlpha(50), RoundedCornerShape(16.dp))
+                            .padding(6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.app_icon),
+                            contentDescription = "APK Organizer",
+                            contentScale = ContentScale.Fit,
                         )
-                        .background(scheme.surfaceContainerHighest, RoundedCornerShape(14.dp)),
-                )
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(
-                        "APK Organizer",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        "v$appVersion",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.outline,
-                    )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            "APK Organizer",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "v$appVersion",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.withAlpha(180),
+                        )
+                    }
+                }
+                if (apkCount > 0) {
+                    Spacer(Modifier.height(16.dp))
+                    Row {
+                        DrawerStatChip("$apkCount files")
+                        Spacer(Modifier.width(8.dp))
+                        DrawerStatChip(totalSizeLabel)
+                    }
                 }
             }
 
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 28.dp),
-                color = scheme.outlineVariant.withAlpha(100),
-            )
+            Spacer(Modifier.height(10.dp))
 
             NavigationDrawerItem(
                 icon = { Icon(Icons.Outlined.Folder, contentDescription = null) },
@@ -2277,6 +2316,25 @@ private fun DrawerSectionLabel(label: String) {
     )
 }
 
+/** Small translucent chip used inside the gradient drawer header. */
+@Composable
+private fun DrawerStatChip(text: String) {
+    Box(
+        modifier = Modifier
+            .background(Color.White.withAlpha(40), RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.W600,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 /** The APK details bottom sheet shown when tapping a tile. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -2319,13 +2377,11 @@ private fun ApkDetailsBottomSheet(
                 Box(
                     modifier = Modifier
                         .size(72.dp)
-                        .shadow(
-                            12.dp,
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            Brush.linearGradient(AppGradients.hero),
                             RoundedCornerShape(18.dp),
-                            spotColor = scheme.primary.withAlpha(30),
-                            ambientColor = scheme.primary.withAlpha(30),
-                        )
-                        .background(scheme.primaryContainer, RoundedCornerShape(18.dp)),
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     com.apkorganizer.ui.widgets.FileImage(
@@ -2335,7 +2391,7 @@ private fun ApkDetailsBottomSheet(
                         Icon(
                             Icons.Filled.Android,
                             contentDescription = null,
-                            tint = scheme.primary,
+                            tint = Color.White,
                             modifier = Modifier.size(40.dp),
                         )
                     }

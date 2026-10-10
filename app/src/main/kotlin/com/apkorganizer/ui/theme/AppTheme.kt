@@ -15,15 +15,15 @@ import androidx.compose.ui.unit.dp
 /**
  * Single source of truth for corner radii.
  *
- * Everything rounded comes from here: cards 14, controls 12, dialogs 20,
- * sheets 28, chips 8 — the exact values the Flutter theme used.
+ * Everything rounded comes from here: cards 18, controls 14, dialogs 24,
+ * sheets 30, chips 10 — the softened, more modern radii of the v2 design.
  */
 object AppRadius {
-    val card = 14.dp
-    val control = 12.dp
-    val dialog = 20.dp
-    val sheet = 28.dp
-    val chip = 8.dp
+    val card = 18.dp
+    val control = 14.dp
+    val dialog = 24.dp
+    val sheet = 30.dp
+    val chip = 10.dp
 
     val cardShape: RoundedCornerShape get() = RoundedCornerShape(card)
     val controlShape: RoundedCornerShape get() = RoundedCornerShape(control)
@@ -33,6 +33,21 @@ object AppRadius {
 
 /** Flutter `Colors.deepOrange` — used by the Move actions. */
 val DeepOrange = Color(0xFFFF5722)
+
+/**
+ * Signature gradients of the v2 redesign: a deep-emerald → bright-teal
+ * brand sweep used by the hero card, app bar identity mark, drawer header
+ * and empty states.
+ */
+object AppGradients {
+    val hero: List<Color>
+        @Composable get() =
+            if (LocalIsDarkTheme.current) {
+                listOf(Color(0xFF04423A), Color(0xFF0B6B5A))
+            } else {
+                listOf(Color(0xFF00695C), Color(0xFF00997F))
+            }
+}
 
 /** Divider tint (theme divider color: outlineVariant at 120/160 alpha). */
 val LocalAppDividerColor = staticCompositionLocalOf { Color.Unspecified }

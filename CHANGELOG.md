@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.2.0] — Visual redesign (v2)
+- **New design language** — a deep-emerald → bright-teal signature gradient,
+  softer radii (cards 18, controls 14, dialogs 24, sheets 30) and a cleaner
+  tonal surface style across light & dark themes
+- **Redesigned home screen** — branded app bar with live file-count &
+  total-size subtitle, gradient hero Smart Insights card with white-on
+  gradient stats, floating "Scan Now" FAB and a rounded scan-progress card
+- **Gradient drawer header** with file-count and total-size chips
+- **New list tiles** — larger 56dp icons, softer borders, stronger
+  selection state (1.5dp accent border), duplicate badge chips
+- **Floating selection bars** (home + installed apps) — rounded, elevated
+  cards that slide in and out
+- APK detail, installed-app detail, empty states and the permission screen
+  all adopt the gradient identity mark
+- No behavior changes — state management and every operation work exactly
+  as in 1.1.0
+
 ## [1.1.0] — Smart Insights & polish
 - **Smart Insights card** — a live overview above the APK list: total file
   count, combined size and distinct app count, computed in a single O(n)

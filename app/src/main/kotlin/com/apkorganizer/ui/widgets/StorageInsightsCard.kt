@@ -1,8 +1,6 @@
 package com.apkorganizer.ui.widgets
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,8 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,17 +27,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apkorganizer.data.StorageInsights
+import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppRadius
 
 /**
- * The "Smart Insights" card shown above the APK list: one glance tells the
- * user how many files they have, how much space they use and how much could
- * be reclaimed by removing duplicates — with a one-tap cleanup action.
+ * The "Smart Insights" hero card — the centerpiece of the redesigned home
+ * screen. One glance tells the user how many APK files they have, how much
+ * space they use and how much could be reclaimed by removing duplicates,
+ * with a one-tap cleanup action.
  */
 @Composable
 fun StorageInsightsCard(
@@ -54,34 +55,22 @@ fun StorageInsightsCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(AppRadius.cardShape)
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        scheme.surfaceContainerLow,
-                        scheme.primaryContainer.withAlpha(40),
-                    ),
-                ),
-                AppRadius.cardShape,
-            )
-            .border(
-                BorderStroke(1.dp, scheme.outlineVariant.withAlpha(120)),
-                AppRadius.cardShape,
-            ),
+            .background(Brush.linearGradient(AppGradients.hero), AppRadius.cardShape),
     ) {
-        // Header label
+        // Header row
         Row(
-            modifier = Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp),
+            modifier = Modifier.padding(start = 20.dp, top = 18.dp, end = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 modifier = Modifier
-                    .background(scheme.primary.withAlpha(30), RoundedCornerShape(8.dp))
-                    .padding(6.dp),
+                    .background(Color.White.withAlpha(40), RoundedCornerShape(10.dp))
+                    .padding(7.dp),
             ) {
                 Icon(
                     Icons.Filled.AutoAwesome,
                     contentDescription = null,
-                    tint = scheme.primary,
+                    tint = Color.White,
                     modifier = Modifier.size(16.dp),
                 )
             }
@@ -89,7 +78,8 @@ fun StorageInsightsCard(
             Text(
                 "Smart Insights",
                 style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.W700,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
             )
         }
 
@@ -97,46 +87,51 @@ fun StorageInsightsCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 14.dp),
+                .padding(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 16.dp),
         ) {
-            InsightStat(
+            HeroStat(
                 value = "${insights.totalFiles}",
                 label = "APK Files",
                 modifier = Modifier.weight(1f),
             )
-            StatDivider()
-            InsightStat(
+            HeroDivider()
+            HeroStat(
                 value = insights.formattedTotalSize,
                 label = "Total Size",
                 modifier = Modifier.weight(1.2f),
             )
-            StatDivider()
-            InsightStat(
+            HeroDivider()
+            HeroStat(
                 value = "${insights.distinctApps}",
                 label = "Apps",
                 modifier = Modifier.weight(0.8f),
             )
         }
 
-        HorizontalDivider(color = scheme.outlineVariant.withAlpha(100), thickness = 1.dp)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Color.White.withAlpha(40)),
+        )
 
         if (insights.hasDuplicates) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onCleanDuplicates)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(start = 20.dp, top = 12.dp, end = 16.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
                     modifier = Modifier
-                        .background(scheme.tertiaryContainer, RoundedCornerShape(10.dp))
-                        .padding(7.dp),
+                        .background(Color.White.withAlpha(40), RoundedCornerShape(12.dp))
+                        .padding(8.dp),
                 ) {
                     Icon(
                         Icons.Filled.AutoAwesome,
                         contentDescription = null,
-                        tint = scheme.onTertiaryContainer,
+                        tint = Color.White,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -146,38 +141,45 @@ fun StorageInsightsCard(
                         "${insights.duplicateFiles} duplicate file(s) found",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.W600,
+                        color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         "Free ${insights.formattedReclaimable} by removing them",
                         style = MaterialTheme.typography.bodySmall,
-                        color = scheme.onSurfaceVariant,
+                        color = Color.White.withAlpha(180),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Spacer(Modifier.width(8.dp))
-                FilledTonalButton(
+                Button(
                     onClick = onCleanDuplicates,
                     enabled = !isScanning,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp),
                     shape = RoundedCornerShape(AppRadius.control),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = scheme.primary,
+                        disabledContainerColor = Color.White.withAlpha(140),
+                        disabledContentColor = scheme.primary.withAlpha(150),
+                    ),
                 ) {
-                    Text("Clean")
+                    Text("Clean", fontWeight = FontWeight.W700)
                 }
             }
         } else {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
                     Icons.Filled.CheckCircle,
                     contentDescription = null,
-                    tint = scheme.primary,
+                    tint = Color.White,
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.width(12.dp))
@@ -188,7 +190,7 @@ fun StorageInsightsCard(
                         "No duplicates — your APK collection looks tidy"
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = scheme.onSurfaceVariant,
+                    color = Color.White.withAlpha(200),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -198,7 +200,7 @@ fun StorageInsightsCard(
 }
 
 @Composable
-private fun InsightStat(value: String, label: String, modifier: Modifier = Modifier) {
+private fun HeroStat(value: String, label: String, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -208,7 +210,7 @@ private fun InsightStat(value: String, label: String, modifier: Modifier = Modif
             value,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = Color.White,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
@@ -217,7 +219,7 @@ private fun InsightStat(value: String, label: String, modifier: Modifier = Modif
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
+            color = Color.White.withAlpha(180),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -225,12 +227,12 @@ private fun InsightStat(value: String, label: String, modifier: Modifier = Modif
 }
 
 @Composable
-private fun StatDivider() {
+private fun HeroDivider() {
     Box(
         modifier = Modifier
-            .padding(horizontal = 4.dp)
+            .padding(horizontal = 6.dp)
             .width(1.dp)
             .height(34.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant.withAlpha(100)),
+            .background(Color.White.withAlpha(50)),
     )
 }

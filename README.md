@@ -11,7 +11,7 @@ A lightweight yet powerful Android utility built with **Kotlin + Jetpack Compose
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3-7F52FF?logo=kotlin&logoColor=white&style=for-the-badge)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack-Compose-4285F4?logo=jetpackcompose&logoColor=white&style=for-the-badge)](https://developer.android.com/jetpack/compose)
 [![Android](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white&style=for-the-badge)](https://www.android.com)
-[![Version](https://img.shields.io/badge/Version-1.1.0-blue?style=for-the-badge)](https://github.com/Sajedur0/APK-Organizer/releases)
+[![Version](https://img.shields.io/badge/Version-1.2.0-blue?style=for-the-badge)](https://github.com/Sajedur0/APK-Organizer/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/Sajedur0/APK-Organizer?style=for-the-badge&logo=github)](https://github.com/Sajedur0/APK-Organizer/stargazers)
 [![Issues](https://img.shields.io/github/issues/Sajedur0/APK-Organizer?style=for-the-badge&logo=github)](https://github.com/Sajedur0/APK-Organizer/issues)
@@ -20,12 +20,13 @@ A lightweight yet powerful Android utility built with **Kotlin + Jetpack Compose
 
 ---
 
-> **v1.1.0 — Smart Insights.** Adds a live storage-overview card (file count,
-> total size, distinct apps), duplicate awareness with one-tap cleanup that
-> reports reclaimed space, folder memory for moves/backups and parallel batch
-> deletes — on top of the v1.0.9 Kotlin rewrite, which ported the entire app
-> (UI, state and logic) from Flutter/Dart to native Kotlin with Jetpack
-> Compose.
+> **v1.2.0 — Visual redesign.** A fresh design language: signature
+> emerald→teal gradient hero surfaces, softer radii, redesigned tiles,
+> floating selection bars, a branded app bar and gradient drawer header —
+> with zero behavior changes. Built on v1.1.0's Smart Insights (live
+> storage overview, one-tap duplicate cleanup with reclaimed-space
+> reporting, folder memory and parallel batch deletes) and the v1.0.9
+> Kotlin rewrite of the original Flutter app.
 
 ## Features
 

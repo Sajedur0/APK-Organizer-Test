@@ -52,6 +52,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -61,6 +63,7 @@ import com.apkorganizer.data.ApkDetailInfo
 import com.apkorganizer.data.ApkManager
 import com.apkorganizer.data.ApkManagerException
 import com.apkorganizer.data.ApkPermission
+import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppRadius
 import com.apkorganizer.ui.widgets.FileImage
 import com.apkorganizer.ui.widgets.HexagonDotsLoading
@@ -277,13 +280,14 @@ private fun ApkDetailHeader(detail: ApkDetailInfo) {
             Box(
                 modifier = Modifier
                     .size(64.dp)
-                    .background(scheme.primaryContainer, RoundedCornerShape(18.dp)),
+                    .background(Brush.linearGradient(AppGradients.hero), RoundedCornerShape(18.dp)),
+                contentAlignment = Alignment.Center,
             ) {
                 FileImage(path = detail.iconPath, modifier = Modifier.size(64.dp)) {
                     Icon(
                         Icons.Filled.Android,
                         contentDescription = null,
-                        tint = scheme.primary,
+                        tint = Color.White,
                         modifier = Modifier.size(36.dp),
                     )
                 }

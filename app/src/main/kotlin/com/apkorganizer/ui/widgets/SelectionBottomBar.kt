@@ -1,6 +1,8 @@
 package com.apkorganizer.ui.widgets
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -32,12 +34,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.apkorganizer.ui.theme.AppRadius
 import com.apkorganizer.ui.theme.DeepOrange
 
-/** Selection action bar shown when APK files are multi-selected. */
+/** Floating selection action bar shown when APK files are multi-selected. */
 @Composable
 fun SelectionBottomBar(
     selectedCount: Int,
@@ -52,15 +57,19 @@ fun SelectionBottomBar(
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(22.dp)
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(12.dp, spotColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 26f / 255f))
-            .background(scheme.surfaceContainerHighest)
+            .padding(horizontal = 12.dp)
             .padding(
                 bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
             )
+            .shadow(16.dp, shape, spotColor = Color.Black.copy(alpha = 40f / 255f))
+            .clip(shape)
+            .background(scheme.surfaceContainerHighest)
+            .border(BorderStroke(1.dp, scheme.outlineVariant.withAlpha(100)), shape)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

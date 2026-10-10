@@ -52,7 +52,7 @@ import androidx.compose.ui.unit.sp
 import com.apkorganizer.data.ApkFile
 import com.apkorganizer.ui.theme.AppRadius
 
-/** One APK card in the home list — port of the Flutter `ApkListTile`. */
+/** One APK card in the home list — v2 redesign with softer, roomier cards. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ApkListTile(
@@ -80,38 +80,42 @@ fun ApkListTile(
     val containerColor =
         if (isSelected) scheme.primaryContainer.withAlpha(100) else scheme.surfaceContainerLow
     val borderColor =
-        if (isSelected) scheme.primary.withAlpha(140) else scheme.outlineVariant.withAlpha(120)
+        if (isSelected) scheme.primary.withAlpha(160) else scheme.outlineVariant.withAlpha(90)
+    val borderWidth = if (isSelected) 1.5.dp else 1.dp
 
     var menuOpen by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 16.dp, vertical = 5.dp)
             .fillMaxWidth()
             .clip(shape)
             .background(containerColor)
-            .border(BorderStroke(1.dp, borderColor), shape)
+            .border(BorderStroke(borderWidth, borderColor), shape)
             .combinedClickable(onClick = onTap, onLongClick = onLongPress)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // 52dp icon container with the selection badge on top.
-            Box(modifier = Modifier.size(52.dp)) {
+            // 56dp icon container with the selection badge on top.
+            Box(modifier = Modifier.size(56.dp)) {
                 Box(
                     modifier = Modifier
-                        .size(52.dp)
-                        .background(scheme.primaryContainer, RoundedCornerShape(AppRadius.card)),
+                        .size(56.dp)
+                        .background(
+                            scheme.primaryContainer.withAlpha(140),
+                            RoundedCornerShape(16.dp),
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     FileImage(
                         path = apk.iconPath,
-                        modifier = Modifier.size(52.dp),
+                        modifier = Modifier.size(56.dp),
                     ) {
                         Icon(
                             Icons.Filled.Android,
                             contentDescription = null,
                             tint = scheme.primary,
-                            modifier = Modifier.size(28.dp),
+                            modifier = Modifier.size(30.dp),
                         )
                     }
                 }
@@ -141,19 +145,19 @@ fun ApkListTile(
                 Text(
                     apk.displayName,
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.W600,
+                    fontWeight = FontWeight.W700,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(5.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
                             .background(
-                                scheme.primaryContainer.withAlpha(150),
-                                RoundedCornerShape(6.dp),
+                                scheme.primaryContainer,
+                                RoundedCornerShape(AppRadius.chip),
                             )
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
                     ) {
                         Text(
                             "v${apk.versionName}",
@@ -168,9 +172,9 @@ fun ApkListTile(
                             modifier = Modifier
                                 .background(
                                     scheme.tertiaryContainer,
-                                    RoundedCornerShape(6.dp),
+                                    RoundedCornerShape(AppRadius.chip),
                                 )
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                .padding(horizontal = 7.dp, vertical = 2.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
@@ -189,7 +193,7 @@ fun ApkListTile(
                             }
                         }
                     }
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         apk.formattedSize,
                         style = MaterialTheme.typography.bodySmall,
@@ -199,7 +203,7 @@ fun ApkListTile(
                         modifier = Modifier.weight(1f, fill = false),
                     )
                 }
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(3.dp))
                 Text(
                     apk.fileName,
                     style = MaterialTheme.typography.bodySmall,
