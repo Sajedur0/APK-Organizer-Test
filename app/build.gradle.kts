@@ -62,6 +62,7 @@ kotlin {
 dependencies {
     // Required for FileProvider + ActivityResult APIs
     implementation("androidx.core:core-ktx:1.19.0")
+    implementation("androidx.fragment:fragment:1.9.1")
 
     // Compose
     implementation(platform("androidx.compose:compose-bom:2026.01.00"))
