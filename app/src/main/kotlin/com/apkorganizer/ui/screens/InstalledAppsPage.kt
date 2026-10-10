@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Check
@@ -238,10 +239,14 @@ class InstalledAppsState(
         scope.launch {
             try {
                 val roots = ApkManager.getDirectories()
-                directoryPicker = DirectoryPickerRequest(roots) { selected ->
+                val recent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.apkorganizer.services.PreferencesService.lastUsedDirectory
+                        ?.takeIf { java.io.File(it).isDirectory }
+                }
+                directoryPicker = DirectoryPickerRequest(roots, { selected ->
                     directoryPicker = null
                     onPicked(selected)
-                }
+                }, recent)
             } catch (e: ApkManagerException) {
                 snackbar.show(e.message ?: "", isError = true)
             }
@@ -254,6 +259,7 @@ class InstalledAppsState(
             scope.launch {
                 try {
                     val result = ApkManager.backupInstalledApp(app.packageName, dir)
+                    com.apkorganizer.services.PreferencesService.setLastUsedDirectory(dir)
                     snackbar.show(
                         "Backup saved: ${(result["fileName"] as? String) ?: app.displayName}",
                     )
@@ -290,6 +296,9 @@ class InstalledAppsState(
                 }
                 val ok = failures.count { !it }
                 val fail = failures.size - ok
+                if (ok > 0) {
+                    com.apkorganizer.services.PreferencesService.setLastUsedDirectory(dir)
+                }
                 isLoading = false
                 backupProgress = ""
                 selectedPackages = emptySet()
@@ -452,8 +461,8 @@ fun InstalledAppsPage(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = scheme.surface,
-                    scrolledContainerColor = scheme.surface,
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
                 ),
             )
         },
@@ -472,7 +481,7 @@ fun InstalledAppsPage(
         snackbarHost = {
             com.apkorganizer.ui.widgets.ApkSnackbarHost(snackbar)
         },
-        containerColor = scheme.surface,
+        containerColor = Color.Transparent,
     ) { padding ->
         Box(
             Modifier
@@ -539,10 +548,10 @@ fun InstalledAppsPage(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
                                 .background(
                                     scheme.surfaceContainerHighest.withAlpha(128),
-                                    RoundedCornerShape(8.dp),
+                                    AppRadius.controlShape,
                                 )
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -616,6 +625,7 @@ fun InstalledAppsPage(
             initialDirectories = picker.initialDirectories,
             onSelect = picker.onSelect,
             onMessage = { message, isError -> snackbar.show(message, isError = isError) },
+            recentDirectoryPath = picker.recentPath,
         )
     }
 
@@ -661,7 +671,7 @@ private fun InstalledAppTile(
     val containerColor =
         if (isSelected) scheme.primaryContainer.withAlpha(110) else scheme.surfaceContainerLow
     val borderColor =
-        if (isSelected) scheme.primary.withAlpha(140) else scheme.outlineVariant.withAlpha(120)
+        if (isSelected) scheme.primary.withAlpha(160) else Color.White.withAlpha(30)
 
     var menuOpen by remember { mutableStateOf(false) }
 
@@ -795,12 +805,16 @@ private fun InstalledAppsBottomBar(
     onUninstall: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(22.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(12.dp, spotColor = Color.Black.withAlpha(26))
-            .background(scheme.surfaceContainerHighest)
+            .padding(horizontal = 12.dp)
             .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+            .shadow(16.dp, shape, spotColor = Color.Black.withAlpha(40))
+            .clip(shape)
+            .background(scheme.surfaceContainerHighest)
+            .border(BorderStroke(1.dp, Color.White.withAlpha(30)), shape)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -841,7 +855,3 @@ private fun InstalledAppsBottomBar(
         }
     }
 }
-
-/** Alias so the error icon import stays readable. */
-private val Icons.Outlined.ErrorOutlineCompat
-    get() = androidx.compose.material.icons.outlined.ErrorOutline

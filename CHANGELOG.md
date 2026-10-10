@@ -2,6 +2,65 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.3.0] — Glassmorphism redesign
+- **Frosted glass design language** inspired by modern glassmorphism UI:
+  deep-forest green canvas with soft sage/sand glows, translucent white
+  container tokens, 1px light strokes and generous 24dp radii
+- **New palettes** — dark "Leafora forest" (sage primary, mint secondary,
+  sand tertiary) and a frosted light theme of white glass over pale sage
+- **GlassBackdrop** behind every screen: vertical green gradient plus two
+  radial glows; all scaffolds and top app bars are now transparent so the
+  glass floats on the canvas
+- Hero Smart Insights card, drawer header, brand mark, empty states and
+  detail headers get the translucent emerald→sage gradient with a light
+  glass border
+- Light/dark toggle still works — both themes are fully glass-styled
+- No behavior changes — all logic and operations remain identical
+
+## [1.2.0] — Visual redesign (v2)
+- **New design language** — a deep-emerald → bright-teal signature gradient,
+  softer radii (cards 18, controls 14, dialogs 24, sheets 30) and a cleaner
+  tonal surface style across light & dark themes
+- **Redesigned home screen** — branded app bar with live file-count &
+  total-size subtitle, gradient hero Smart Insights card with white-on
+  gradient stats, floating "Scan Now" FAB and a rounded scan-progress card
+- **Gradient drawer header** with file-count and total-size chips
+- **New list tiles** — larger 56dp icons, softer borders, stronger
+  selection state (1.5dp accent border), duplicate badge chips
+- **Floating selection bars** (home + installed apps) — rounded, elevated
+  cards that slide in and out
+- APK detail, installed-app detail, empty states and the permission screen
+  all adopt the gradient identity mark
+- No behavior changes — state management and every operation work exactly
+  as in 1.1.0
+
+## [1.1.0] — Smart Insights & polish
+- **Smart Insights card** — a live overview above the APK list: total file
+  count, combined size and distinct app count, computed in a single O(n)
+  pass whenever the list changes (never on search/sort keystrokes)
+- **Duplicate awareness everywhere** — the insights card shows how many
+  redundant copies exist and exactly how much space removing them would
+  free; every redundant file gets a small "Duplicate" badge in the list,
+  using the exact same keep-newest rules as duplicate removal, so the UI
+  can never disagree with what cleanup actually deletes
+- **One-tap duplicate cleanup** — a "Clean" action on the insights card
+  removes redundant copies (newest kept) with confirmation, progress
+  dialog and a summary that reports the **space reclaimed**
+- **Smart Organize summary** now also reports the space reclaimed by
+  duplicate removal
+- **Folder memory** — the last folder used for a move or backup is
+  remembered and offered as a "Recently used folder" shortcut at the top
+  of the directory picker
+- **Faster batch delete** — deleting many selected files now runs on a
+  bounded worker pool instead of one file at a time
+- Selection action bar slides in/out with animation and its five action
+  chips scroll horizontally on narrow screens
+- Refreshed empty state and a total-size badge in the navigation drawer
+- Fixed several compile-blocking issues from the initial Kotlin rewrite
+  (invalid icon references, a broken modifier chain in the directory
+  filter sheet, an invalid `Canvas` size modifier and missing imports) so
+  the project builds cleanly again
+
 ## [1.0.9] — Kotlin rewrite
 - The entire app was rewritten in **Kotlin with Jetpack Compose (Material 3)**,
   replacing the Flutter/Dart UI and the MethodChannel bridge with a pure

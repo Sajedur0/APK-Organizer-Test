@@ -19,12 +19,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.EventAvailable
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Numbers
-import androidx.compose.material.icons.outlined.Source
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -43,12 +44,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apkorganizer.data.InstalledApp
+import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppRadius
 import com.apkorganizer.ui.widgets.CompactActionChip
 import com.apkorganizer.ui.widgets.FileImage
@@ -102,12 +106,12 @@ fun InstalledAppDetailPage(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = scheme.surface,
-                    scrolledContainerColor = scheme.surface,
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
                 ),
             )
         },
-        containerColor = scheme.surface,
+        containerColor = Color.Transparent,
     ) { padding ->
         Column(
             Modifier
@@ -122,13 +126,17 @@ fun InstalledAppDetailPage(
                     Box(
                         modifier = Modifier
                             .size(64.dp)
-                            .background(scheme.primaryContainer, RoundedCornerShape(18.dp)),
+                            .background(
+                                Brush.linearGradient(AppGradients.hero),
+                                RoundedCornerShape(18.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
                     ) {
                         FileImage(path = app.iconPath, modifier = Modifier.size(64.dp)) {
                             Icon(
                                 Icons.Filled.Android,
                                 contentDescription = null,
-                                tint = scheme.primary,
+                                tint = Color.White,
                                 modifier = Modifier.size(36.dp),
                             )
                         }
@@ -170,7 +178,7 @@ fun InstalledAppDetailPage(
                 Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Column {
                         AppInfoRow(Icons.Outlined.Info, "Version", app.versionName)
-                        AppInfoRow(Icons.Outlined.Numbers, "Version Code", app.versionCode.toString())
+                        AppInfoRow(Icons.Outlined.Code, "Version Code", app.versionCode.toString())
                         AppInfoRow(
                             Icons.Outlined.Category,
                             "Type",
@@ -188,7 +196,7 @@ fun InstalledAppDetailPage(
             InfoCard {
                 Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Column {
-                        AppInfoRow(Icons.Outlined.Source, "Source", app.sourceDir)
+                        AppInfoRow(Icons.Outlined.Description, "Source", app.sourceDir)
                         AppInfoRow(Icons.Outlined.EventAvailable, "Updated", installedDate)
                     }
                 }
@@ -198,7 +206,7 @@ fun InstalledAppDetailPage(
             Row {
                 Box(Modifier.weight(1f)) {
                     CompactActionChip(
-                        icon = androidx.compose.material.icons.Icons.Outlined.Archive,
+                        icon = Icons.Outlined.Archive,
                         label = "Backup APK",
                         color = scheme.primary,
                         onTap = onBackup,

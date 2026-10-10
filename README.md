@@ -11,7 +11,7 @@ A lightweight yet powerful Android utility built with **Kotlin + Jetpack Compose
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3-7F52FF?logo=kotlin&logoColor=white&style=for-the-badge)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack-Compose-4285F4?logo=jetpackcompose&logoColor=white&style=for-the-badge)](https://developer.android.com/jetpack/compose)
 [![Android](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white&style=for-the-badge)](https://www.android.com)
-[![Version](https://img.shields.io/badge/Version-1.0.9-blue?style=for-the-badge)](https://github.com/Sajedur0/APK-Organizer/releases)
+[![Version](https://img.shields.io/badge/Version-1.3.0-blue?style=for-the-badge)](https://github.com/Sajedur0/APK-Organizer/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/Sajedur0/APK-Organizer?style=for-the-badge&logo=github)](https://github.com/Sajedur0/APK-Organizer/stargazers)
 [![Issues](https://img.shields.io/github/issues/Sajedur0/APK-Organizer?style=for-the-badge&logo=github)](https://github.com/Sajedur0/APK-Organizer/issues)
@@ -20,9 +20,12 @@ A lightweight yet powerful Android utility built with **Kotlin + Jetpack Compose
 
 ---
 
-> **v1.0.9 — Kotlin rewrite.** The entire app (UI, state and logic) was ported
-> from Flutter/Dart to native Kotlin with Jetpack Compose, keeping the design,
-> behavior and performance characteristics of the Flutter version intact.
+> **v1.3.0 — Glassmorphism.** A frosted-glass design language: deep-forest
+> green canvas with sage glows, translucent white surfaces, light 1px
+> strokes and soft 24dp radii — in both dark and light themes. Built on
+> v1.2.0's visual redesign, v1.1.0's Smart Insights (live overview, one-tap
+> duplicate cleanup, folder memory, parallel batch deletes) and the v1.0.9
+> Kotlin rewrite of the original Flutter app.
 
 ## Features
 
@@ -48,7 +51,10 @@ A lightweight yet powerful Android utility built with **Kotlin + Jetpack Compose
 </td>
 <td width="50%" valign="top">
 
-### 🧠 Smart Organize
+### 🧠 Smart Organize & Insights
+- Live **Smart Insights** card: file count, total size, distinct apps
+- Duplicate badges on redundant files + **one-tap duplicate cleanup**
+  with a "space reclaimed" summary
 - Auto-rename files to `AppName_VersionName.apk`
 - Detect & remove duplicates in one pass
 - Cancellable with progress dialog + summary report
@@ -84,7 +90,8 @@ A lightweight yet powerful Android utility built with **Kotlin + Jetpack Compose
 - **Installed Apps** — Browse user & system apps with detail page
 - **Backup** — Export installed apps as APK files (single & batch)
 - **Rename** — Auto or manual rename with undo support
-- **Move** — Visual file browser with conflict auto-suffix & undo
+- **Move** — Visual file browser with conflict auto-suffix & undo, plus a
+  remembered "recently used folder" shortcut
 - **Share** — Share APK files via system share sheet
 - **Auto Updates** — Native Play UI only, no custom dialogs
 

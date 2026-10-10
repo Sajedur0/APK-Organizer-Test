@@ -166,4 +166,10 @@ class PermissionRationaleRequest(
 class DirectoryPickerRequest(
     val initialDirectories: List<com.apkorganizer.data.DirectoryEntry>,
     val onSelect: (String?) -> Unit,
+    /**
+     * Optional shortcut shown at the top of the picker: the folder the user
+     * last moved/backed-up files to (validated to still exist before it is
+     * offered).
+     */
+    val recentPath: String? = null,
 )

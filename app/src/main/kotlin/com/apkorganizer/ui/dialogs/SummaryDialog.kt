@@ -35,11 +35,11 @@ import androidx.compose.ui.window.Dialog
 import com.apkorganizer.ui.theme.AppRadius
 import com.apkorganizer.ui.widgets.withAlpha
 
-/** Result summary dialog used after "Smart Organize". */
+/** Result summary dialog used after "Smart Organize" and duplicate cleanup. */
 @Composable
 fun SummaryDialog(
     title: String,
-    stats: List<Pair<String, Int>>,
+    stats: List<Pair<String, String>>,
     details: List<String>,
     errors: List<String>,
     onDismiss: () -> Unit,

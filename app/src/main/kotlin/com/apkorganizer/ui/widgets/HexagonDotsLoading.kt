@@ -45,7 +45,7 @@ fun HexagonDotsLoading(
     )
 
     Box(modifier = modifier.size(minRadius * 5), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSizeOfCanvas()) {
+        Canvas(Modifier.fillMaxSize()) {
             val orbitRadius = size.minDimension * 0.32f
             val minDotRadius = size.minDimension * 0.075f
             val maxDotRadius = size.minDimension * 0.13f
