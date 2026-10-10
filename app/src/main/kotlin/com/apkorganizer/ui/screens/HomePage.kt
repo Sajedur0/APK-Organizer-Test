@@ -66,6 +66,7 @@ import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerDefaults
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -129,6 +130,11 @@ import com.apkorganizer.ui.dialogs.SummaryDialog
 import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppRadius
 import com.apkorganizer.ui.theme.DeepOrange
+import com.apkorganizer.ui.theme.DialogBlurBehind
+import com.apkorganizer.ui.theme.FrostedSurface
+import com.apkorganizer.ui.theme.LocalGlassBlurState
+import com.apkorganizer.ui.theme.glassBlurSource
+import com.apkorganizer.ui.theme.glassDialogContainer
 import com.apkorganizer.ui.widgets.ApkSnackbarHost
 import com.apkorganizer.ui.widgets.ApkListTile
 import com.apkorganizer.ui.widgets.BottomSheetAction
@@ -1518,6 +1524,7 @@ fun HomePage(
     ) {
         Scaffold(
             topBar = {
+                FrostedSurface(Modifier.fillMaxWidth()) {
                 TopAppBar(
                     title = {
                         if (state.isSearching) {
@@ -1585,6 +1592,7 @@ fun HomePage(
                         scrolledContainerColor = Color.Transparent,
                     ),
                 )
+                }
             },
             bottomBar = {
                 AnimatedVisibility(
@@ -1636,7 +1644,8 @@ fun HomePage(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    .padding(padding)
+                    .glassBlurSource(LocalGlassBlurState.current),
             ) {
                 HomeBody(state = state, context = context)
             }
@@ -2144,6 +2153,10 @@ private fun AppDrawerContent(
     onItemSelected: (String) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    FrostedSurface(
+        shape = DrawerDefaults.shape,
+        tint = scheme.surfaceContainerLow,
+    ) {
     ModalDrawerSheet(
         drawerContainerColor = scheme.surfaceContainerLow,
     ) {
@@ -2306,6 +2319,7 @@ private fun AppDrawerContent(
             Spacer(Modifier.height(16.dp))
         }
     }
+    }
 }
 
 @Composable
@@ -2357,9 +2371,10 @@ private fun ApkDetailsBottomSheet(
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         shape = AppRadius.sheetShape,
-        containerColor = scheme.surfaceContainerLow,
+        containerColor = glassDialogContainer(),
         dragHandle = null,
     ) {
+        DialogBlurBehind()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2553,9 +2568,10 @@ private fun DirectoryFilterSheet(
             skipPartiallyExpanded = false,
         ),
         shape = AppRadius.sheetShape,
-        containerColor = scheme.surfaceContainerLow,
+        containerColor = glassDialogContainer(),
         dragHandle = null,
     ) {
+        DialogBlurBehind()
         Column(
             Modifier
                 .fillMaxWidth()
@@ -2660,9 +2676,10 @@ private fun FilterRow(
 @Composable
 private fun OrganizeProgressDialog(progress: OrganizeProgressState) {
     Dialog(onDismissRequest = {}) {
+        DialogBlurBehind()
         Surface(
             shape = RoundedCornerShape(AppRadius.dialog),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = glassDialogContainer(),
         ) {
             Column(Modifier.padding(24.dp)) {
                 Text(

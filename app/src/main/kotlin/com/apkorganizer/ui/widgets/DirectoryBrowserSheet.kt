@@ -46,7 +46,9 @@ import com.apkorganizer.data.ApkManager
 import com.apkorganizer.data.ApkManagerException
 import com.apkorganizer.data.DirectoryEntry
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.DialogBlurBehind
 import com.apkorganizer.ui.theme.LocalAppDividerColor
+import com.apkorganizer.ui.theme.glassDialogContainer
 import kotlinx.coroutines.launch
 
 /**
@@ -143,9 +145,10 @@ fun DirectoryBrowserSheet(
         onDismissRequest = { onSelect(null) },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
         shape = AppRadius.sheetShape,
-        containerColor = scheme.surfaceContainerLow,
+        containerColor = glassDialogContainer(),
         dragHandle = null,
     ) {
+        DialogBlurBehind()
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.72f)) {
             SheetHandle(Modifier.align(Alignment.CenterHorizontally))
             Row(

@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.FrostedSurface
 import com.apkorganizer.ui.theme.LocalIsDarkTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -108,10 +109,16 @@ fun ApkSnackbar(
         if (isDark) scheme.onSurface else scheme.inverseOnSurface
     val actionColor = if (data.isError) scheme.onError else scheme.inversePrimary
 
-    Surface(
+    FrostedSurface(
         modifier = modifier
             .padding(horizontal = 12.dp, vertical = 12.dp)
             .fillMaxWidth(),
+        shape = RoundedCornerShape(AppRadius.control),
+        tint = Color.Transparent,
+        border = null,
+    ) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(AppRadius.control),
         color = containerColor,
         shadowElevation = 6.dp,
@@ -140,6 +147,7 @@ fun ApkSnackbar(
             }
         }
     }
+    }
 }
 
 /** Auto-dismiss helper for simple inline snackbars. */
@@ -163,7 +171,7 @@ fun AutoDismissSnackbar(
 @Composable
 fun BannerSurface(
     modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 128f / 255f),
+    color: Color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 210f / 255f),
     content: @Composable () -> Unit,
 ) {
     androidx.compose.foundation.layout.Box(

@@ -23,6 +23,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.DialogBlurBehind
+import com.apkorganizer.ui.theme.glassDialogContainer
 
 /**
  * Confirmation dialog matching the app's dialogs: "Cancel" text button plus a
@@ -41,7 +43,10 @@ fun ConfirmDialog(
     AlertDialog(
         onDismissRequest = { onResult(false) },
         title = { Text(title) },
-        text = { Text(message) },
+        text = {
+            DialogBlurBehind()
+            Text(message)
+        },
         confirmButton = {
             Button(
                 onClick = { onResult(true) },
@@ -61,7 +66,7 @@ fun ConfirmDialog(
             TextButton(onClick = { onResult(false) }) { Text("Cancel") }
         },
         shape = androidx.compose.foundation.shape.RoundedCornerShape(AppRadius.dialog),
-        containerColor = scheme.surfaceContainerLow,
+        containerColor = glassDialogContainer(),
     )
 }
 
@@ -76,7 +81,10 @@ fun PermissionRationaleDialog(
     AlertDialog(
         onDismissRequest = { onResult(false) },
         title = { Text(title) },
-        text = { Text(message) },
+        text = {
+            DialogBlurBehind()
+            Text(message)
+        },
         confirmButton = {
             Button(onClick = { onResult(true) }) { Text("Grant Permission") }
         },
@@ -84,7 +92,7 @@ fun PermissionRationaleDialog(
             TextButton(onClick = { onResult(false) }) { Text("Cancel") }
         },
         shape = androidx.compose.foundation.shape.RoundedCornerShape(AppRadius.dialog),
-        containerColor = scheme.surfaceContainerLow,
+        containerColor = glassDialogContainer(),
     )
 }
 
@@ -112,6 +120,7 @@ fun TextInputDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            DialogBlurBehind()
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
@@ -139,7 +148,7 @@ fun TextInputDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
         shape = androidx.compose.foundation.shape.RoundedCornerShape(AppRadius.dialog),
-        containerColor = scheme.surfaceContainerLow,
+        containerColor = glassDialogContainer(),
     )
 }
 

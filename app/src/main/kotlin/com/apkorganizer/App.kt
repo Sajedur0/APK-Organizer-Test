@@ -2,24 +2,20 @@ package com.apkorganizer
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.toSize
+import androidx.compose.ui.layout.onSizeChanged
 import com.apkorganizer.services.PreferencesService
 import com.apkorganizer.ui.AppScreen
 import com.apkorganizer.ui.screens.ApkDetailPage
@@ -27,8 +23,11 @@ import com.apkorganizer.ui.screens.HomePage
 import com.apkorganizer.ui.screens.InstalledAppDetailPage
 import com.apkorganizer.ui.screens.InstalledAppsPage
 import com.apkorganizer.ui.screens.PrivacyPolicyPage
-import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppTheme
+import com.apkorganizer.ui.theme.GlassBlurState
+import com.apkorganizer.ui.theme.LocalGlassBlurState
+import com.apkorganizer.ui.theme.glassCanvas
+import com.apkorganizer.ui.theme.rememberGlassBlurState
 
 /**
  * Root composable of the app — the port of `main.dart` / `entry_point.dart`:
@@ -53,12 +52,15 @@ fun ApkOrganizerApp(
 
     BackHandler(enabled = screens.isNotEmpty()) { pop() }
 
+    val glassBlur = rememberGlassBlurState()
+
     AppTheme(darkTheme = darkTheme) {
+        CompositionLocalProvider(LocalGlassBlurState provides glassBlur) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surface,
         ) {
-            GlassBackdrop {
+            GlassBackdrop(glassBlur) {
                 when (val top = screens.lastOrNull()) {
                     null -> HomePage(
                         appVersion = appVersion,
@@ -96,44 +98,28 @@ fun ApkOrganizerApp(
                 }
             }
         }
+        }
     }
 }
 
 /**
  * The frosted canvas of the glassmorphism design: a vertical green gradient
- * plus two soft sage/sand glows for the translucent "glass" surfaces to
- * float on. Screens render their scaffolds transparently on top of it.
+ * plus two soft sage/sand glows (see [glassCanvas]) for the translucent
+ * "glass" surfaces to float on. Screens render their scaffolds transparently
+ * on top of it. The canvas size is tracked so frosted panels can repaint the
+ * backdrop seamlessly behind themselves.
  */
 @Composable
-private fun GlassBackdrop(content: @Composable () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
+private fun GlassBackdrop(
+    glassBlur: GlassBlurState,
+    content: @Composable () -> Unit,
+) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(AppGradients.backdrop)),
+            .onSizeChanged { glassBlur.canvasSize = it.toSize() }
+            .glassCanvas(),
     ) {
-        Box(
-            Modifier
-                .size(360.dp)
-                .align(Alignment.TopEnd)
-                .offset(x = 90.dp, y = (-80).dp)
-                .background(
-                    Brush.radialGradient(
-                        listOf(scheme.primary.copy(alpha = 0.22f), Color.Transparent),
-                    ),
-                ),
-        )
-        Box(
-            Modifier
-                .size(320.dp)
-                .align(Alignment.BottomStart)
-                .offset(x = (-80).dp, y = 90.dp)
-                .background(
-                    Brush.radialGradient(
-                        listOf(scheme.tertiary.copy(alpha = 0.16f), Color.Transparent),
-                    ),
-                ),
-        )
         content()
     }
 }

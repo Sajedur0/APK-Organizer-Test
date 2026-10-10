@@ -54,6 +54,9 @@ import androidx.compose.ui.unit.dp
 import com.apkorganizer.data.InstalledApp
 import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.FrostedSurface
+import com.apkorganizer.ui.theme.LocalGlassBlurState
+import com.apkorganizer.ui.theme.glassBlurSource
 import com.apkorganizer.ui.widgets.CompactActionChip
 import com.apkorganizer.ui.widgets.FileImage
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +95,7 @@ fun InstalledAppDetailPage(
 
     Scaffold(
         topBar = {
+            FrostedSurface(Modifier.fillMaxWidth()) {
             TopAppBar(
                 title = {
                     Text(
@@ -110,6 +114,7 @@ fun InstalledAppDetailPage(
                     scrolledContainerColor = Color.Transparent,
                 ),
             )
+            }
         },
         containerColor = Color.Transparent,
     ) { padding ->
@@ -117,6 +122,7 @@ fun InstalledAppDetailPage(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .glassBlurSource(LocalGlassBlurState.current)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {

@@ -70,7 +70,8 @@ val LocalIsDarkTheme = staticCompositionLocalOf { false }
  *
  * The container tokens are translucent white, so every card, dialog, sheet
  * and bar reads as frosted glass floating on the green backdrop — the core
- * of the glassmorphism look.
+ * of the glassmorphism look. The alphas are deliberately thick so the frosted
+ * panels blur/hide whatever sits behind them.
  */
 private val DarkScheme: ColorScheme = darkColorScheme(
     primary = Color(0xFFABD3A4),
@@ -90,7 +91,7 @@ private val DarkScheme: ColorScheme = darkColorScheme(
     onBackground = Color(0xFFDFE8DC),
     surface = Color(0xFF0B1712),
     onSurface = Color(0xFFDFE8DC),
-    surfaceVariant = Color(0x27FFFFFF),
+    surfaceVariant = Color(0x59FFFFFF),
     onSurfaceVariant = Color(0xFFB4C6B2),
     surfaceTint = Color(0xFFABD3A4),
     inverseSurface = Color(0xFFDFE8DC),
@@ -104,14 +105,14 @@ private val DarkScheme: ColorScheme = darkColorScheme(
     scrim = Color(0xFF000000),
     surfaceBright = Color(0xFF27392C),
     surfaceDim = Color(0xFF0B1712),
-    surfaceContainer = Color(0x1FFFFFFF),
-    surfaceContainerHigh = Color(0x29FFFFFF),
-    surfaceContainerHighest = Color(0x33FFFFFF),
-    surfaceContainerLow = Color(0x14FFFFFF),
+    surfaceContainer = Color(0x59FFFFFF),
+    surfaceContainerHigh = Color(0x66FFFFFF),
+    surfaceContainerHighest = Color(0x7AFFFFFF),
+    surfaceContainerLow = Color(0x4DFFFFFF),
     surfaceContainerLowest = Color(0xFF07110C),
 )
 
-/** Frosted light scheme — white glass over a pale sage canvas. */
+/** Frosted light scheme — white glass over a pale sage canvas (thick frost, nothing shows through). */
 private val LightScheme: ColorScheme = lightColorScheme(
     primary = Color(0xFF3C6B4B),
     onPrimary = Color(0xFFFFFFFF),
@@ -130,7 +131,7 @@ private val LightScheme: ColorScheme = lightColorScheme(
     onBackground = Color(0xFF1A241C),
     surface = Color(0xFFEFF4EB),
     onSurface = Color(0xFF1A241C),
-    surfaceVariant = Color(0xCCFFFFFF),
+    surfaceVariant = Color(0xE6FFFFFF),
     onSurfaceVariant = Color(0xFF455245),
     surfaceTint = Color(0xFF3C6B4B),
     inverseSurface = Color(0xFF2B382C),
@@ -144,10 +145,10 @@ private val LightScheme: ColorScheme = lightColorScheme(
     scrim = Color(0xFF000000),
     surfaceBright = Color(0xFFFFFFFF),
     surfaceDim = Color(0xFFD8E2D2),
-    surfaceContainer = Color(0xCCFFFFFF),
-    surfaceContainerHigh = Color(0xD9FFFFFF),
-    surfaceContainerHighest = Color(0xE6FFFFFF),
-    surfaceContainerLow = Color(0xB3FFFFFF),
+    surfaceContainer = Color(0xE6FFFFFF),
+    surfaceContainerHigh = Color(0xF2FFFFFF),
+    surfaceContainerHighest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xD9FFFFFF),
     surfaceContainerLowest = Color(0xFFFFFFFF),
 )
 
