@@ -105,7 +105,7 @@ fun ApkSnackbar(
         if (data.isError) scheme.error
         else if (isDark) scheme.surfaceContainerHighest else scheme.inverseSurface
     val contentColor =
-        if (isDark) scheme.onSurface else scheme.onInverseSurface
+        if (isDark) scheme.onSurface else scheme.inverseOnSurface
     val actionColor = if (data.isError) scheme.onError else scheme.inversePrimary
 
     Surface(

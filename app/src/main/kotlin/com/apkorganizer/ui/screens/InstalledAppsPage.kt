@@ -61,6 +61,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -374,8 +375,8 @@ fun InstalledAppsPage(
     onPush: (AppScreen) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val snackbar = remember { SnackbarController(rememberCoroutineScope()) }
     val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarController(scope) }
     val state = remember { InstalledAppsState(scope, snackbar, includeSystem) }
 
     val lifecycleOwner = LocalLifecycleOwner.current

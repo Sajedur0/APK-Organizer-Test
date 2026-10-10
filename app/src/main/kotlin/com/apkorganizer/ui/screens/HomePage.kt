@@ -1787,8 +1787,11 @@ private fun onDrawerItemSelected(
 
 /** Collects a StateFlow without the compose-runtime-collectAsState dependency split. */
 @Composable
-private fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsStateSafe(): androidx.compose.runtime.State<T> =
-    androidx.compose.runtime.collectAsState(this)
+private fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsStateSafe(): androidx.compose.runtime.State<T> {
+    val holder = remember { mutableStateOf(value) }
+    LaunchedEffect(this) { this@collectAsStateSafe.collect { holder.value = it } }
+    return holder
+}
 
 @Composable
 private fun SortMenuButton(state: HomeState) {

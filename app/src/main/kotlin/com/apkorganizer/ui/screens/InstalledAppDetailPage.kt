@@ -79,7 +79,7 @@ fun InstalledAppDetailPage(
             try {
                 val file = File(app.sourceDir)
                 if (file.exists() && file.lastModified() > 0L) {
-                    com.apkorganizer.utils.FormatUtil.formatDate(file.lastModified())
+                    com.apkorganizer.utils.FormatUtil.formatShortDate(file.lastModified())
                 } else {
                     "Unknown"
                 }
