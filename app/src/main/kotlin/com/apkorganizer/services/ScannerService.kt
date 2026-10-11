@@ -60,6 +60,11 @@ class ScannerService {
         var wasCancelled = false
         logger.info("Scan", "Starting full storage scan")
 
+        // Every ApkFile instance built for a progress batch is kept here so
+        // the final result list can reuse them instead of re-parsing every
+        // map a second time (N allocations + cold lazy caches avoided).
+        val builtByPath = HashMap<String, ApkFile>()
+
         try {
             val files = ApkManager.scanAllStorage { event ->
                 if (isCancelled() && !cancelRequested) {
@@ -69,7 +74,13 @@ class ScannerService {
                     logger.info("Scan", "Cancellation requested")
                 }
 
-                val batch = event.apks.map { ApkFile.fromMap(it) }
+                val batch = if (event.apks.isEmpty()) {
+                    emptyList()
+                } else {
+                    event.apks.map { raw ->
+                        ApkFile.fromMap(raw).also { builtByPath[it.path] = it }
+                    }
+                }
                 onProgress(
                     ScanProgress(
                         filesFound = event.filesFound,
@@ -84,7 +95,8 @@ class ScannerService {
                     logger.error("Scan", "Native scan reported an error: ${event.currentDirectory}")
                 }
             }
-            val sorted = files.map { ApkFile.fromMap(it) }
+            val sorted = files
+                .map { raw -> builtByPath[raw["path"] as? String] ?: ApkFile.fromMap(raw) }
                 .sortedWith(ApkFile.compareByDisplayName)
             val elapsed = System.currentTimeMillis() - startedAt
             logger.info(

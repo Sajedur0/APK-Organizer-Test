@@ -1172,47 +1172,58 @@ object ApkManager {
         withContext(Dispatchers.IO) {
             val pm = packageManager()
                 ?: throw ApkManagerException("Context not available")
-            val groups = mutableMapOf<String, MutableList<String>>()
 
-            filePaths.forEach { path ->
-                val file = File(path).takeIf { it.exists() } ?: return@forEach
-                var pkgName = "unknown"
-                var appName: String
-                var versionName: String
-                var versionCode = 0L
-
-                try {
-                    val info = runCatching { getArchivePackageInfo(pm, path, 0) }.getOrNull()
-                    if (info != null) {
-                        pkgName = info.packageName ?: "unknown"
-                        info.applicationInfo?.let { ai ->
-                            ai.sourceDir = path
-                            ai.publicSourceDir = path
-                            appName = ai.loadLabel(pm).toString()
-                        } ?: run { appName = file.nameWithoutExtension }
-                        versionName = info.versionName ?: "Unknown"
-                        versionCode = versionCodeOf(info)
-                    } else {
-                        appName = file.nameWithoutExtension
-                        versionName = "Unknown"
-                    }
-                } catch (_: Exception) {
-                    appName = file.nameWithoutExtension
-                    versionName = "Unknown"
-                }
-
-                val versionPart =
-                    if (versionCode > 0L) versionCode.toString() else versionName.lowercase()
-                val key = if (pkgName != "unknown") {
-                    "pkg:${pkgName.lowercase()}|version:$versionPart"
-                } else {
-                    "fallback:${appName.lowercase()}|${versionName.lowercase()}"
-                }
-                groups.getOrPut(key) { mutableListOf() }.add(path)
+            // Computing each file's duplicate key means parsing the archive —
+            // the expensive part — so it runs across the worker pool instead
+            // of sequentially; grouping afterwards is a cheap O(n) pass.
+            val keyed = mapParallel(filePaths) { path ->
+                val file = File(path).takeIf { it.exists() } ?: return@mapParallel null
+                path to duplicateKeyFor(pm, file)
             }
 
+            val groups = LinkedHashMap<String, MutableList<String>>()
+            for ((path, key) in keyed) {
+                groups.getOrPut(key) { mutableListOf() }.add(path)
+            }
             groups.values.filter { it.size > 1 }
         }
+
+    /** Duplicate identity of one APK file (same rules as `ApkFile.duplicateIdentity`). */
+    private fun duplicateKeyFor(pm: PackageManager, file: File): String {
+        val path = file.absolutePath
+        var pkgName = "unknown"
+        var appName: String
+        var versionName: String
+        var versionCode = 0L
+
+        try {
+            val info = runCatching { getArchivePackageInfo(pm, path, 0) }.getOrNull()
+            if (info != null) {
+                pkgName = info.packageName ?: "unknown"
+                info.applicationInfo?.let { ai ->
+                    ai.sourceDir = path
+                    ai.publicSourceDir = path
+                    appName = ai.loadLabel(pm).toString()
+                } ?: run { appName = file.nameWithoutExtension }
+                versionName = info.versionName ?: "Unknown"
+                versionCode = versionCodeOf(info)
+            } else {
+                appName = file.nameWithoutExtension
+                versionName = "Unknown"
+            }
+        } catch (_: Exception) {
+            appName = file.nameWithoutExtension
+            versionName = "Unknown"
+        }
+
+        val versionPart =
+            if (versionCode > 0L) versionCode.toString() else versionName.lowercase()
+        return if (pkgName != "unknown") {
+            "pkg:${pkgName.lowercase()}|version:$versionPart"
+        } else {
+            "fallback:${appName.lowercase()}|${versionName.lowercase()}"
+        }
+    }
 
     // ------------------------------------------------------------------
     // APK detail

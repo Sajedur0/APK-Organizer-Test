@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.apkorganizer.data.StorageInsights
 import com.apkorganizer.ui.theme.AppGradients
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.glassSheen
 
 /**
  * The "Smart Insights" hero card — the centerpiece of the redesigned home
@@ -58,6 +59,7 @@ fun StorageInsightsCard(
             .fillMaxWidth()
             .clip(AppRadius.cardShape)
             .background(Brush.linearGradient(AppGradients.hero), AppRadius.cardShape)
+            .glassSheen()
             .border(
                 BorderStroke(1.dp, Color.White.withAlpha(40)),
                 AppRadius.cardShape,
