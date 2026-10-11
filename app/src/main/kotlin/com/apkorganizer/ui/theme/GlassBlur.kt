@@ -42,7 +42,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * The frosted-glass ("Transparent Glossy") blur system.
@@ -128,6 +130,12 @@ fun Modifier.glassBlurSource(state: GlassBlurState?): Modifier {
  * soft sage/sand glows. [origin] is where the canvas' (0, 0) sits in this
  * draw scope's coordinates and [canvas] its full size — panels pass their own
  * position so the painted replica lines up seamlessly with the real canvas.
+ *
+ * [phase] (`0f..1f`, cyclic) drives the aurora drift of the v1.3.2 redesign:
+ * both glows orbit slowly around their home positions and breathe in size,
+ * which makes the glass feel alive without any layout work — the animation
+ * only re-draws the backdrop layer. Frosted replicas keep `phase = 0` so the
+ * opaque floor under glass panels stays perfectly still.
  */
 internal fun DrawScope.drawGlassCanvas(
     origin: Offset,
@@ -135,6 +143,7 @@ internal fun DrawScope.drawGlassCanvas(
     backdrop: List<Color>,
     glowAColor: Color,
     glowBColor: Color,
+    phase: Float = 0f,
 ) {
     val width = if (canvas.width > 0f) canvas.width else size.width
     val height = if (canvas.height > 0f) canvas.height else size.height
@@ -147,32 +156,47 @@ internal fun DrawScope.drawGlassCanvas(
         ),
     )
 
+    val angle = (phase % 1f) * TWO_PI
+    val drift = 30.dp.toPx()
+    val waveA = sin(angle)
+    val angleB = angle + PI_F
+    val waveB = sin(angleB)
+
     // Matches GlassBackdrop's top-end glow: 360dp box offset (90, -80) dp.
-    val glowASide = 360.dp.toPx()
+    val glowASide = 360.dp.toPx() * (1f + 0.05f * waveA)
     drawRect(
-        brush = Brush.radialGradient(listOf(glowAColor, Color.Transparent)),
+        brush = Brush.radialGradient(
+            listOf(glowAColor.copy(alpha = glowAColor.alpha * (0.85f + 0.15f * waveA)), Color.Transparent),
+        ),
         topLeft = Offset(
-            x = origin.x + width - glowASide + 90.dp.toPx(),
-            y = origin.y - 80.dp.toPx(),
+            x = origin.x + width - glowASide + 90.dp.toPx() + cos(angle) * drift,
+            y = origin.y - 80.dp.toPx() + waveA * drift * 0.6f,
         ),
         size = Size(glowASide, glowASide),
     )
 
     // Matches GlassBackdrop's bottom-start glow: 320dp box offset (-80, 90) dp.
-    val glowBSide = 320.dp.toPx()
+    // Drifts half a cycle out of phase so the two glows never move in lockstep.
+    val glowBSide = 320.dp.toPx() * (1f + 0.05f * waveB)
     drawRect(
-        brush = Brush.radialGradient(listOf(glowBColor, Color.Transparent)),
+        brush = Brush.radialGradient(
+            listOf(glowBColor.copy(alpha = glowBColor.alpha * (0.85f + 0.15f * waveB)), Color.Transparent),
+        ),
         topLeft = Offset(
-            x = origin.x - 80.dp.toPx(),
-            y = origin.y + height - glowBSide + 90.dp.toPx(),
+            x = origin.x - 80.dp.toPx() + cos(angleB) * drift,
+            y = origin.y + height - glowBSide + 90.dp.toPx() + waveB * drift * 0.6f,
         ),
         size = Size(glowBSide, glowBSide),
     )
 }
 
+// Float mirrors of kotlin.math.PI so the drift math stays Float-only.
+private const val PI_F = 3.14159265f
+private const val TWO_PI = 2f * PI_F
+
 /** Paints the full glass canvas across this element (used by [com.apkorganizer.GlassBackdrop]). */
 @Composable
-fun Modifier.glassCanvas(): Modifier {
+fun Modifier.glassCanvas(phase: Float = 0f): Modifier {
     val scheme = MaterialTheme.colorScheme
     val backdrop = AppGradients.backdrop
     val glowA = scheme.primary.copy(alpha = 0.22f)
@@ -184,8 +208,37 @@ fun Modifier.glassCanvas(): Modifier {
             backdrop = backdrop,
             glowAColor = glowA,
             glowBColor = glowB,
+            phase = phase,
         )
     }
+}
+
+/**
+ * Specular "wet" highlight of the glass language (v1.3.2): a soft white
+ * vertical sheen across the top half plus a faint diagonal light streak.
+ * Apply it **after** `background` and before `border` so it sits on top of
+ * the fill and under the rim, e.g. on hero cards and list tiles.
+ */
+fun Modifier.glassSheen(): Modifier = this.drawBehind {
+    drawRect(
+        brush = Brush.verticalGradient(
+            listOf(Color.White.copy(alpha = 0.09f), Color.Transparent),
+            startY = 0f,
+            endY = size.height * 0.55f,
+        ),
+    )
+    drawRect(
+        brush = Brush.linearGradient(
+            listOf(
+                Color.White.copy(alpha = 0.05f),
+                Color.Transparent,
+                Color.Transparent,
+                Color.White.copy(alpha = 0.03f),
+            ),
+            start = Offset.Zero,
+            end = Offset(size.width, size.height),
+        ),
+    )
 }
 
 /**
@@ -257,7 +310,11 @@ fun FrostedSurface(
         // 3) Glass tint.
         Box(Modifier.fillMaxSize().background(tint))
 
-        // 4) Glossy rim.
+        // 4) Specular sheen — the v1.3.2 glossy highlight that makes every
+        //    bar read as polished glass rather than a flat translucent slab.
+        Box(Modifier.fillMaxSize().glassSheen())
+
+        // 5) Glossy rim.
         if (border != null) {
             Box(Modifier.fillMaxSize().border(border, shape))
         }

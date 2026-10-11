@@ -135,6 +135,7 @@ import com.apkorganizer.ui.theme.FrostedSurface
 import com.apkorganizer.ui.theme.LocalGlassBlurState
 import com.apkorganizer.ui.theme.glassBlurSource
 import com.apkorganizer.ui.theme.glassDialogContainer
+import com.apkorganizer.ui.theme.glassSheen
 import com.apkorganizer.ui.widgets.ApkSnackbarHost
 import com.apkorganizer.ui.widgets.ApkListTile
 import com.apkorganizer.ui.widgets.BottomSheetAction
@@ -256,7 +257,16 @@ class HomeState(
     private val scanBuffer = mutableListOf<ApkFile>()
     private var scanFlushJob: Job? = null
     private var cachedDirectoryList: List<String>? = null
-    private var cachedDirectoryListCount = -1
+    private var cachedDirectoryListVersion = -1
+
+    /**
+     * Bumped on every structural change of the master list (add / replace /
+     * remove). The directory-filter cache keys off it, so the cache survives
+     * pure UI work (search, sort, selection) but can never go stale after a
+     * move/rename/delete — unlike the old count-based invalidation, which
+     * missed structural changes that kept the file count identical.
+     */
+    private var masterVersion = 0
     private var searchDebounce: Job? = null
 
     private val scannerService = ScannerService()
@@ -438,6 +448,7 @@ class HomeState(
         positionByPath.clear()
         filteredApkFiles = emptyList()
         insightsDirty = true
+        masterVersion++
 
         try {
             val result = scannerService.scanAllStorage(
@@ -450,8 +461,19 @@ class HomeState(
 
             apkIndex.clear()
             positionByPath.clear()
-            allApkFiles.clear()
-            allApkFiles.addAll(result.allFiles)
+            if (allApkFiles.size == result.allFiles.size) {
+                // Fast path: the buffer flush already upserted exactly the
+                // files the scan returned (same instances, warm lazy caches),
+                // so we only sort + re-index instead of rebuilding the list.
+                val sorted = allApkFiles.sortedWith(ApkFile.compareByDisplayName)
+                allApkFiles.clear()
+                allApkFiles.addAll(sorted)
+            } else {
+                // Defensive fallback (should not happen): adopt the scan's
+                // authoritative result list.
+                allApkFiles.clear()
+                allApkFiles.addAll(result.allFiles)
+            }
             for (i in allApkFiles.indices) {
                 val apk = allApkFiles[i]
                 apkIndex[apk.path] = apk
@@ -459,6 +481,7 @@ class HomeState(
             }
             scanFoundCount = result.allFiles.size
             insightsDirty = true
+            masterVersion++
             applyFilter()
 
             if (result.cancelled) {
@@ -512,6 +535,7 @@ class HomeState(
         if (position == null) {
             positionByPath[apk.path] = allApkFiles.size
             allApkFiles.add(apk)
+            masterVersion++
         } else {
             allApkFiles[position] = apk
         }
@@ -538,6 +562,7 @@ class HomeState(
             }
         }
         insightsDirty = true
+        if (oldPath != apk.path) masterVersion++
     }
 
     /** Removes [path] from every in-memory structure. */
@@ -558,6 +583,41 @@ class HomeState(
             selectedPaths = selectedPaths - path
         }
         insightsDirty = true
+        masterVersion++
+    }
+
+    /**
+     * Batch version of [removeEntry]: removes every path in [paths] with a
+     * single rebuild of the list and position index — O(n) total instead of
+     * O(n × k) when deleting k files (batch deletes and duplicate cleanups
+     * used to re-index the whole list once per removed file).
+     */
+    private fun removeEntries(paths: Collection<String>) {
+        if (paths.isEmpty()) return
+        val doomed = if (paths is Set<String>) paths else paths.toHashSet()
+        var removedAny = false
+        for (path in doomed) {
+            if (apkIndex.remove(path) != null) removedAny = true
+            positionByPath.remove(path)
+        }
+        if (!removedAny) return
+
+        val rebuilt = ArrayList<ApkFile>((allApkFiles.size - doomed.size).coerceAtLeast(0))
+        for (apk in allApkFiles) {
+            if (apk.path !in doomed) rebuilt.add(apk)
+        }
+        allApkFiles.clear()
+        allApkFiles.addAll(rebuilt)
+        positionByPath.clear()
+        for (i in allApkFiles.indices) {
+            positionByPath[allApkFiles[i].path] = i
+        }
+        if (selectedPaths.isNotEmpty()) {
+            val pruned = selectedPaths.filterNotTo(LinkedHashSet()) { it in doomed }
+            if (pruned.size != selectedPaths.size) selectedPaths = pruned
+        }
+        insightsDirty = true
+        masterVersion++
     }
 
     // --- filtering / sorting -------------------------------------------------
@@ -641,11 +701,13 @@ class HomeState(
     }
 
     fun directoryListForFilter(): List<String> {
-        // Reuse the cached list while the scan set is unchanged.
-        if (cachedDirectoryList == null || cachedDirectoryListCount != allApkFiles.size) {
-            val dirs = allApkFiles.mapTo(LinkedHashSet()) { it.directory }.toSortedSet()
-            cachedDirectoryList = dirs.toList()
-            cachedDirectoryListCount = allApkFiles.size
+        // Reuse the cached list while the master list is structurally unchanged.
+        if (cachedDirectoryList == null || cachedDirectoryListVersion != masterVersion) {
+            cachedDirectoryList = allApkFiles
+                .mapTo(LinkedHashSet()) { it.directory }
+                .toSortedSet()
+                .toList()
+            cachedDirectoryListVersion = masterVersion
         }
         return cachedDirectoryList ?: emptyList()
     }
@@ -788,10 +850,9 @@ class HomeState(
                     false
                 }
             }
-            for (i in paths.indices) {
-                if (deleteOk[i] != true) continue
-                removeEntry(paths[i])
-            }
+            removeEntries(
+                paths.filterIndexed { index, _ -> deleteOk[index] == true },
+            )
             val failed = paths.filterIndexed { index, _ -> deleteOk[index] != true }
             selectedPaths = emptySet()
             applyFilter()
@@ -1216,9 +1277,7 @@ class HomeState(
                 isCancelled = { token.isCancelled },
             )
 
-            for (path in dupSummary.deletedPaths) {
-                removeEntry(path)
-            }
+            removeEntries(dupSummary.deletedPaths)
             selectedPaths = emptySet()
             applyFilter()
 
@@ -1324,9 +1383,7 @@ class HomeState(
                 isCancelled = { token.isCancelled },
             )
 
-            for (path in summary.deletedPaths) {
-                removeEntry(path)
-            }
+            removeEntries(summary.deletedPaths)
             selectedPaths = emptySet()
             applyFilter()
 
@@ -1386,15 +1443,18 @@ class HomeState(
 
     fun shareApkFiles(apks: List<ApkFile>, context: android.content.Context) {
         scope.launch {
-            val valid = apks.filter {
-                withContext(Dispatchers.IO) {
-                    try {
-                        File(it.path).exists()
+            // One dispatcher hop for the whole batch instead of one per file.
+            val existing = withContext(Dispatchers.IO) {
+                apks.mapNotNull { apk ->
+                    val exists = try {
+                        File(apk.path).exists()
                     } catch (_: Exception) {
                         false
                     }
-                }
+                    if (exists) apk.path else null
+                }.toHashSet()
             }
+            val valid = apks.filter { it.path in existing }
             if (valid.isEmpty()) {
                 snackbar.show("No valid APK file(s) to share.", isError = true)
                 return@launch
@@ -2166,6 +2226,7 @@ private fun AppDrawerContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Brush.linearGradient(AppGradients.hero))
+                    .glassSheen()
                     .padding(start = 24.dp, top = 28.dp, end = 24.dp, bottom = 22.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -20,6 +20,13 @@ A lightweight yet powerful Android utility built with **Kotlin + Jetpack Compose
 
 ---
 
+> **v1.3.2 — Aurora glass + faster logic.** The glass canvas is now alive:
+> the sage/sand glows drift and breathe behind every frosted surface, and a
+> specular sheen gives top bars, cards, tiles and sheets real glass depth.
+> Under the hood, batch deletes/cleanups are O(n), scans reuse parsed
+> instances, sorting no longer allocates per comparison, and duplicate
+> detection runs on the worker pool.
+>
 > **v1.3.1 — Deep frosted blur.** The Transparent Glossy system is now
 > heavily blurred: glass bars, snackbar and drawer blur the content behind
 > them, and dialogs/sheets blur the whole app behind their window — nothing

@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.3.2] — Aurora glass polish + logic optimizations
+- **Aurora backdrop** — the two sage/sand glows behind the glass now slowly
+  drift along small orbits and breathe in size/alpha on a 12s loop, so the
+  frosted canvas feels lit from within. The animation lives in its own leaf
+  composable, so only the backdrop layer redraws each frame; the screens on
+  top never recompose because of it.
+- **Specular sheen** — a subtle glossy highlight band is now painted across
+  every frosted surface (top/selection bars, snackbar, drawer), the Smart
+  Insights hero card, the APK list tiles and the drawer header, giving the
+  surfaces real "glass" depth instead of a flat translucent fill.
+- **Batch removal is now O(n)** — deleting many files (batch delete, Smart
+  Organize, duplicate cleanup) rebuilds the list and position index once
+  instead of re-indexing the whole list per removed file (was O(n × k)).
+- **Faster scans** — the scanner reuses the `ApkFile` instances it already
+  built for progress batches when assembling the final result (no second
+  parse of every file), and the home list adopts them with a sort + re-index
+  instead of rebuilding from scratch.
+- **Cheaper sorting** — sort comparators no longer lower-case file names on
+  every comparison (cached per file), removing thousands of allocations when
+  sorting large lists.
+- **Parallel duplicate detection** — `detectDuplicates` now parses archives
+  across the worker pool instead of sequentially.
+- **Fresh directory filter cache** — the filter's folder cache is keyed to a
+  structural version counter, so it can no longer go stale after a
+  same-count move/rename.
+- **Sharing** checks file existence in a single background hop instead of
+  one dispatcher switch per file.
+
 ## [1.3.1] — Deep blur for the Transparent Glossy system
 - **Heavier frosted blur everywhere** so nothing behind the glass stays
   visible: top bars, selection bars, the snackbar and the navigation drawer

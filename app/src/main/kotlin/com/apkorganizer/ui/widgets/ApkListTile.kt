@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apkorganizer.data.ApkFile
 import com.apkorganizer.ui.theme.AppRadius
+import com.apkorganizer.ui.theme.glassSheen
 
 /** One APK card in the home list — v2 redesign with softer, roomier cards. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -91,6 +92,7 @@ fun ApkListTile(
             .fillMaxWidth()
             .clip(shape)
             .background(containerColor)
+            .glassSheen()
             .border(BorderStroke(borderWidth, borderColor), shape)
             .combinedClickable(onClick = onTap, onLongClick = onLongPress)
             .padding(horizontal = 14.dp, vertical = 12.dp),

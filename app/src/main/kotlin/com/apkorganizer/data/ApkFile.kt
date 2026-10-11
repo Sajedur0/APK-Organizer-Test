@@ -56,6 +56,13 @@ class ApkFile(
     /** Lower-cased [displayName] — used as the primary sort key. */
     val sortName: String by lazy { displayName.lowercase() }
 
+    /**
+     * Lower-cased [fileName] — cached because sort comparators used to call
+     * `fileName.lowercase()` on every comparison (thousands of allocations
+     * while sorting a large list).
+     */
+    val fileNameLower: String by lazy { fileName.lowercase() }
+
     /** Lower-cased [versionName] (used by version comparisons). */
     val versionLower: String by lazy { versionName.lowercase() }
 
@@ -172,7 +179,7 @@ class ApkFile(
             if (nameCompare != 0) return@Comparator nameCompare
             val versionCompare = b.versionCode.compareTo(a.versionCode)
             if (versionCompare != 0) return@Comparator versionCompare
-            val fileCompare = a.fileName.lowercase().compareTo(b.fileName.lowercase())
+            val fileCompare = a.fileNameLower.compareTo(b.fileNameLower)
             if (fileCompare != 0) return@Comparator fileCompare
             a.path.compareTo(b.path)
         }

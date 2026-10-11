@@ -2,6 +2,12 @@ package com.apkorganizer
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
@@ -108,18 +114,46 @@ fun ApkOrganizerApp(
  * "glass" surfaces to float on. Screens render their scaffolds transparently
  * on top of it. The canvas size is tracked so frosted panels can repaint the
  * backdrop seamlessly behind themselves.
+ *
+ * The animated canvas lives in its own leaf composable ([AuroraCanvas]) so
+ * the per-frame aurora phase only re-draws the backdrop layer and never
+ * recomposes the screens on top of it.
  */
 @Composable
 private fun GlassBackdrop(
     glassBlur: GlassBlurState,
     content: @Composable () -> Unit,
 ) {
+    Box(Modifier.fillMaxSize()) {
+        AuroraCanvas(glassBlur)
+        content()
+    }
+}
+
+/**
+ * The living part of the v1.3.2 "aurora glass" look: the two background
+ * glows drift slowly along small orbits and breathe in size/alpha on a
+ * [AURORA_CYCLE_MS] loop, so the frosted canvas feels lit from within.
+ */
+@Composable
+private fun AuroraCanvas(glassBlur: GlassBlurState) {
+    val transition = rememberInfiniteTransition(label = "aurora")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = AURORA_CYCLE_MS, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "auroraPhase",
+    )
     Box(
         Modifier
             .fillMaxSize()
             .onSizeChanged { glassBlur.canvasSize = Size(it.width.toFloat(), it.height.toFloat()) }
-            .glassCanvas(),
-    ) {
-        content()
-    }
+            .glassCanvas(phase),
+    )
 }
+
+/** One full drift/breathe cycle of the background aurora glows. */
+private const val AURORA_CYCLE_MS = 12_000
