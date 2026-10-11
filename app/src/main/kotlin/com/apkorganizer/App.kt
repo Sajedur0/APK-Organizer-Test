@@ -109,8 +109,8 @@ fun ApkOrganizerApp(
 }
 
 /**
- * The frosted canvas of the glassmorphism design: a vertical green gradient
- * plus two soft sage/sand glows (see [glassCanvas]) for the translucent
+ * The frosted canvas of the glassmorphism design: a vertical navy gradient
+ * plus two soft azure/teal glows (see [glassCanvas]) for the translucent
  * "glass" surfaces to float on. Screens render their scaffolds transparently
  * on top of it. The canvas size is tracked so frosted panels can repaint the
  * backdrop seamlessly behind themselves.

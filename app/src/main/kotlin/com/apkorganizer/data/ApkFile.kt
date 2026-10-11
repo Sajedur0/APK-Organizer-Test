@@ -8,6 +8,9 @@ import com.apkorganizer.utils.FormatUtil
  * ## Performance note
  * Every derived value (`displayName`, search text, sort key, suggested file
  * name, formatted size) is computed **once** and cached on the instance.
+ * The caches use `PUBLICATION` mode: every value is a pure function of the
+ * immutable fields, so a rare duplicate computation is harmless and avoids a
+ * per-property lock object on each of thousands of instances.
  * `copyWith` returns a new instance, so the caches can never go stale.
  */
 class ApkFile(
@@ -45,7 +48,7 @@ class ApkFile(
     )
 
     /** Name shown in the list: app label, else file name, else package name. */
-    val displayName: String by lazy {
+    val displayName: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         val trimmedAppName = appName.trim()
         if (trimmedAppName.isNotEmpty()) return@lazy trimmedAppName
         val trimmedFileName = fileName.trim()
@@ -54,31 +57,31 @@ class ApkFile(
     }
 
     /** Lower-cased [displayName] — used as the primary sort key. */
-    val sortName: String by lazy { displayName.lowercase() }
+    val sortName: String by lazy(LazyThreadSafetyMode.PUBLICATION) { displayName.lowercase() }
 
     /**
      * Lower-cased [fileName] — cached because sort comparators used to call
      * `fileName.lowercase()` on every comparison (thousands of allocations
      * while sorting a large list).
      */
-    val fileNameLower: String by lazy { fileName.lowercase() }
+    val fileNameLower: String by lazy(LazyThreadSafetyMode.PUBLICATION) { fileName.lowercase() }
 
     /** Lower-cased [versionName] (used by version comparisons). */
-    val versionLower: String by lazy { versionName.lowercase() }
+    val versionLower: String by lazy(LazyThreadSafetyMode.PUBLICATION) { versionName.lowercase() }
 
     /** Everything the search box matches against, already lower-cased. */
-    val searchLower: String by lazy {
-        listOf(
-            displayName,
-            fileName,
-            packageName,
-            versionName,
-            versionCode.toString(),
-        ).joinToString(" ").lowercase()
+    val searchLower: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        buildString(displayName.length + fileName.length + packageName.length + versionName.length + 24) {
+            append(displayName).append(' ')
+            append(fileName).append(' ')
+            append(packageName).append(' ')
+            append(versionName).append(' ')
+            append(versionCode)
+        }.lowercase()
     }
 
     /** Folder that contains this file. */
-    val directory: String by lazy { FormatUtil.parentPath(path) }
+    val directory: String by lazy(LazyThreadSafetyMode.PUBLICATION) { FormatUtil.parentPath(path) }
 
     /** True when the APK could not be parsed at all. */
     val isUnparsed: Boolean
@@ -93,7 +96,7 @@ class ApkFile(
      * (`"Unknown"`) must never be grouped — deleting the wrong file is far
      * worse than missing a duplicate.
      */
-    val duplicateIdentity: String by lazy {
+    val duplicateIdentity: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         val normalizedPackage = packageName.trim().lowercase()
         if (normalizedPackage.isNotEmpty() && normalizedPackage != "unknown") {
             val versionPart =
@@ -105,10 +108,10 @@ class ApkFile(
             "${versionName.trim().lowercase()}|$size"
     }
 
-    val formattedSize: String by lazy { FormatUtil.formatBytes(size) }
+    val formattedSize: String by lazy(LazyThreadSafetyMode.PUBLICATION) { FormatUtil.formatBytes(size) }
 
     /** Target name for "auto rename": `AppName_VersionName.apk`. */
-    val suggestedRename: String by lazy {
+    val suggestedRename: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         val safeAppName = sanitizeFilePart(displayName)
         val versionSource = when {
             versionName.trim().isNotEmpty() && versionName != "Unknown" -> versionName
@@ -120,7 +123,7 @@ class ApkFile(
     }
 
     /** Stem (file name without extension) of [suggestedRename]. */
-    private val suggestedStem: String by lazy {
+    private val suggestedStem: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         suggestedRename.substring(0, suggestedRename.length - ".apk".length)
     }
 
@@ -131,7 +134,7 @@ class ApkFile(
      * also counts as "already named", which keeps "Smart Organize" idempotent:
      * a second run does no work instead of renaming files over and over.
      */
-    val needsRename: Boolean by lazy {
+    val needsRename: Boolean by lazy(LazyThreadSafetyMode.PUBLICATION) {
         val currentStem =
             if (fileName.lowercase().endsWith(".apk")) fileName.substring(0, fileName.length - 4)
             else fileName

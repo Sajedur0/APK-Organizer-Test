@@ -126,8 +126,8 @@ fun Modifier.glassBlurSource(state: GlassBlurState?): Modifier {
 }
 
 /**
- * Paints the signature glass canvas: the vertical green gradient plus the two
- * soft sage/sand glows. [origin] is where the canvas' (0, 0) sits in this
+ * Paints the signature glass canvas: the vertical navy gradient plus the two
+ * soft azure/teal glows. [origin] is where the canvas' (0, 0) sits in this
  * draw scope's coordinates and [canvas] its full size — panels pass their own
  * position so the painted replica lines up seamlessly with the real canvas.
  *
@@ -200,7 +200,7 @@ fun Modifier.glassCanvas(phase: Float = 0f): Modifier {
     val scheme = MaterialTheme.colorScheme
     val backdrop = AppGradients.backdrop
     val glowA = scheme.primary.copy(alpha = 0.22f)
-    val glowB = scheme.tertiary.copy(alpha = 0.16f)
+    val glowB = scheme.secondary.copy(alpha = 0.15f)
     return this.drawBehind {
         drawGlassCanvas(
             origin = Offset.Zero,
@@ -222,9 +222,9 @@ fun Modifier.glassCanvas(phase: Float = 0f): Modifier {
 fun Modifier.glassSheen(): Modifier = this.drawBehind {
     drawRect(
         brush = Brush.verticalGradient(
-            listOf(Color.White.copy(alpha = 0.09f), Color.Transparent),
+            listOf(Color.White.copy(alpha = 0.10f), Color.Transparent),
             startY = 0f,
-            endY = size.height * 0.55f,
+            endY = size.height * 0.50f,
         ),
     )
     drawRect(
@@ -263,7 +263,7 @@ fun FrostedSurface(
     val scheme = MaterialTheme.colorScheme
     val backdrop = AppGradients.backdrop
     val glowA = scheme.primary.copy(alpha = 0.22f)
-    val glowB = scheme.tertiary.copy(alpha = 0.16f)
+    val glowB = scheme.secondary.copy(alpha = 0.15f)
     var positionInRoot by remember { mutableStateOf(Offset.Zero) }
 
     Box(
@@ -366,8 +366,8 @@ fun glassDialogContainer(): Color {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         scheme.surfaceContainerHighest
     } else if (LocalIsDarkTheme.current) {
-        Color(0xFF1B3527)
+        AppPalette.darkGlassSlab
     } else {
-        Color(0xFFE8F0E4)
+        AppPalette.lightGlassSlab
     }
 }

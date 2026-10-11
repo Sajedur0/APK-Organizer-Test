@@ -17,39 +17,37 @@ class DuplicateGroup(
      * same file is always chosen across separate `findDuplicates` /
      * `removeDuplicates` calls (avoiding deleting the wrong duplicate).
      */
-    val fileToKeep: ApkFile
-        get() {
-            var best: ApkFile? = null
-            for (file in files) {
-                if (best == null) {
+    val fileToKeep: ApkFile by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        var best: ApkFile? = null
+        for (file in files) {
+            if (best == null) {
+                best = file
+                continue
+            }
+            val modified = file.lastModified.compareTo(best.lastModified)
+            if (modified > 0) {
+                best = file
+                continue
+            }
+            if (modified == 0) {
+                val size = file.size.compareTo(best.size)
+                if (size > 0) {
                     best = file
                     continue
                 }
-                val modified = file.lastModified.compareTo(best.lastModified)
-                if (modified > 0) {
+                if (size == 0 && file.path < best.path) {
                     best = file
-                    continue
-                }
-                if (modified == 0) {
-                    val size = file.size.compareTo(best.size)
-                    if (size > 0) {
-                        best = file
-                        continue
-                    }
-                    if (size == 0 && file.path < best.path) {
-                        best = file
-                    }
                 }
             }
-            return best ?: files.first()
         }
+        best ?: files.first()
+    }
 
     /** Files to delete: all except the selected keep file. */
-    val filesToDelete: List<ApkFile>
-        get() {
-            val keep = fileToKeep
-            return files.filter { it.path != keep.path }
-        }
+    val filesToDelete: List<ApkFile> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        val keepPath = fileToKeep.path
+        files.filter { it.path != keepPath }
+    }
 }
 
 /** Summary of a duplicate removal operation. */
@@ -107,16 +105,12 @@ class DuplicateHandler {
         return DuplicateAnalysis(byIdentity, byApp)
     }
 
-    fun findDuplicates(files: List<ApkFile>): List<DuplicateGroup> {
-        logger.info("Duplicates", "Scanning ${files.size} file(s) for duplicates")
-
-        val analysis = analyzeApks(files)
-        logAppsWithMultipleVersions(analysis.multiVersion)
-
-        val duplicates = mutableListOf<DuplicateGroup>()
-        for (group in analysis.duplicates.values) {
+    /** Turns identity buckets into [DuplicateGroup]s (only buckets with 2+ files). */
+    private fun duplicateGroupsOf(byIdentity: Map<String, List<ApkFile>>): List<DuplicateGroup> {
+        val groups = ArrayList<DuplicateGroup>()
+        for (group in byIdentity.values) {
             if (group.size > 1) {
-                duplicates.add(
+                groups.add(
                     DuplicateGroup(
                         appName = group.first().displayName,
                         versionName = group.first().versionName,
@@ -125,6 +119,16 @@ class DuplicateHandler {
                 )
             }
         }
+        return groups
+    }
+
+    fun findDuplicates(files: List<ApkFile>): List<DuplicateGroup> {
+        logger.info("Duplicates", "Scanning ${files.size} file(s) for duplicates")
+
+        val analysis = analyzeApks(files)
+        logAppsWithMultipleVersions(analysis.multiVersion)
+
+        val duplicates = duplicateGroupsOf(analysis.duplicates)
 
         logger.info(
             "Duplicates",
@@ -140,19 +144,15 @@ class DuplicateHandler {
         onProgress: ((Int, Int) -> Unit)? = null,
         isCancelled: (() -> Boolean)? = null,
     ): DuplicateRemovalSummary {
-        // Fast path: if every file has a unique duplicate identity, no work is
-        // possible. Skipping `findDuplicates` (which builds grouping maps and
-        // logs multi-version apps) saves a full-list scan in the common case
-        // of zero duplicates.
-        val identitySeen = HashSet<String>()
-        var hasDuplicates = false
+        // Single grouping pass by duplicate identity. When nothing is
+        // duplicated there is no work — return before any logging of
+        // multi-version apps or allocation of delete lists.
+        val byIdentity = LinkedHashMap<String, MutableList<ApkFile>>()
         for (file in files) {
-            if (!identitySeen.add(file.duplicateIdentity)) {
-                hasDuplicates = true
-                break
-            }
+            byIdentity.getOrPut(file.duplicateIdentity) { ArrayList(2) }.add(file)
         }
-        if (!hasDuplicates) {
+        val groups = duplicateGroupsOf(byIdentity)
+        if (groups.isEmpty()) {
             logger.info(
                 "Duplicates",
                 "No duplicate identities among ${files.size} file(s); skipping removal",
@@ -160,7 +160,6 @@ class DuplicateHandler {
             return DuplicateRemovalSummary(0, 0, 0, emptyList(), emptyList(), 0L)
         }
 
-        val groups = findDuplicates(files)
         val filesKept = groups.size
         val deletedPaths = mutableListOf<String>()
         val errors = mutableListOf<String>()
