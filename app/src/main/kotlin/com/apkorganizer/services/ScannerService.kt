@@ -2,7 +2,7 @@ package com.apkorganizer.services
 
 import com.apkorganizer.data.ApkFile
 import com.apkorganizer.data.ApkManager
-import com.apkorganizer.data.ApkManagerException
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * One progress tick from the scanner.
@@ -32,11 +32,10 @@ class ScannerService {
 
     private val logger = LoggerService
 
-    @Volatile
-    private var scanning = false
+    private val scanning = AtomicBoolean(false)
 
     val isScanning: Boolean
-        get() = scanning
+        get() = scanning.get()
 
     /**
      * Runs a full storage scan and reports batched progress to [onProgress].
@@ -49,12 +48,12 @@ class ScannerService {
         onProgress: (ScanProgress) -> Unit = {},
         isCancelled: () -> Boolean = { false },
     ): ScanResult {
-        if (scanning) {
+        // Atomic check-and-set: two racing callers can never both start a scan.
+        if (!scanning.compareAndSet(false, true)) {
             logger.warning("Scan", "Scan already running — ignoring duplicate start")
             return ScanResult(emptyList(), 0, 0, cancelled = false)
         }
 
-        scanning = true
         val startedAt = System.currentTimeMillis()
         var cancelRequested = false
         var wasCancelled = false
@@ -105,14 +104,11 @@ class ScannerService {
                     "${sorted.size} APK file(s) found in ${elapsed}ms",
             )
             return ScanResult(sorted, sorted.size, elapsed, wasCancelled)
-        } catch (e: ApkManagerException) {
-            logger.error("Scan", "Scan failed: $e")
-            throw e
         } catch (e: Exception) {
             logger.error("Scan", "Scan failed: $e")
             throw e
         } finally {
-            scanning = false
+            scanning.set(false)
         }
     }
 

@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.4.0] — Midnight Azure glass + logic tune-up
+- **Professional glass palette** — the green/sand glass theme is replaced by
+  "Midnight Azure": a deep navy canvas, azure primary, teal secondary and soft
+  indigo tertiary, with frosted-white surfaces in dark mode and crisp white
+  glass over a pale blue canvas in light mode. All palette values now live in
+  one `AppPalette` object so schemes, gradients and the pre-Android-12 glass
+  fallbacks cannot drift apart. The aurora glows are azure + teal, and the
+  specular sheen is slightly crisper.
+- **Race-safe scanner guard** — the "scan already running" check is now an
+  atomic compare-and-set, so two simultaneous starts can never both scan.
+- **Single-pass duplicate removal** — `removeDuplicates` groups files once
+  instead of scanning for duplicates and then grouping again, and keeps a
+  deterministic group order. `DuplicateGroup` caches its keep/delete choice.
+- **Lighter `ApkFile` caches** — derived values use publication-mode lazies
+  (no per-property lock on thousands of instances) and the search text is
+  built with a single `StringBuilder`.
+
 ## [1.3.2] — Aurora glass polish + logic optimizations
 - **Aurora backdrop** — the two sage/sand glows behind the glass now slowly
   drift along small orbits and breathe in size/alpha on a 12s loop, so the
