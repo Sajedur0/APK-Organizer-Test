@@ -14,7 +14,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.toSize
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.onSizeChanged
 import com.apkorganizer.services.PreferencesService
 import com.apkorganizer.ui.AppScreen
@@ -117,7 +117,7 @@ private fun GlassBackdrop(
     Box(
         Modifier
             .fillMaxSize()
-            .onSizeChanged { glassBlur.canvasSize = it.toSize() }
+            .onSizeChanged { glassBlur.canvasSize = Size(it.width.toFloat(), it.height.toFloat()) }
             .glassCanvas(),
     ) {
         content()

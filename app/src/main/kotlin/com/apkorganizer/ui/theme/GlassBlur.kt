@@ -10,8 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.matchParentSize
-import androidx.compose.foundation.shape.RectangleShape
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -113,7 +113,7 @@ fun Modifier.glassBlurSource(state: GlassBlurState?): Modifier {
         .drawWithContent {
             state.isRecording = true
             try {
-                record(state.layer) {
+                state.layer.record() {
                     this@drawWithContent.drawContent()
                 }
             } finally {
@@ -222,7 +222,7 @@ fun FrostedSurface(
         //    behind the panel can ever show through (works on every API level).
         Box(
             Modifier
-                .matchParentSize()
+                .fillMaxSize()
                 .drawBehind {
                     drawGlassCanvas(
                         origin = Offset(-positionInRoot.x, -positionInRoot.y),
@@ -238,7 +238,7 @@ fun FrostedSurface(
         if (useSnapshot && state != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             Box(
                 Modifier
-                    .matchParentSize()
+                    .fillMaxSize()
                     .graphicsLayer { alpha = GlassBlur.snapshotAlpha }
                     .blur(GlassBlur.radius)
                     .drawBehind {
@@ -255,11 +255,11 @@ fun FrostedSurface(
         }
 
         // 3) Glass tint.
-        Box(Modifier.matchParentSize().background(tint))
+        Box(Modifier.fillMaxSize().background(tint))
 
         // 4) Glossy rim.
         if (border != null) {
-            Box(Modifier.matchParentSize().border(border, shape))
+            Box(Modifier.fillMaxSize().border(border, shape))
         }
 
         content()
